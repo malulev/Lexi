@@ -17,6 +17,7 @@ The deployment itself. Exactly one per website.
 | `repo` | `owner/name` | environment | The one repository this install manages |
 | `installationId` | number | environment | GitHub App installation |
 | `netlifySiteId` | string | environment | The one Netlify site |
+| `allowedEmails` | string[] | environment | Who may sign in. Deliberately not in the repository (FR-003c1) |
 | `defaultBranch` | string | derived | Read from the repository, not configured |
 | `publicUrl` | URL | derived | Read from the Netlify site |
 
@@ -29,7 +30,6 @@ Non-secret, developer-editable. Lives at `.webagent/config.yml` in the site's re
 
 | Field | Type | Rules |
 |---|---|---|
-| `allowedEmails` | string[] | Non-empty. Lower-cased on read. Governs who may sign in |
 | `alertContact` | email | Required. Receives cost-ceiling and settings-fault alerts |
 | `costCeilingUsd` | number | > 0. Per request, not per period |
 | `model` | string | `provider/model` passed to the agent |

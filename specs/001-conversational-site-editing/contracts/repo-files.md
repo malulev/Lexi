@@ -6,17 +6,19 @@ contract; changing their shape breaks installations.
 ## `.webagent/config.yml`
 
 ```yaml
-allowedEmails:
-  - jane@client.example
-  - marketing@client.example
 alertContact: dev@agency.example
 costCeilingUsd: 2.00
 model: openrouter/anthropic/claude-sonnet-latest
 maxRequestMinutes: 10
 ```
 
-Every field required. Unknown fields are rejected rather than ignored, so a typo in
-`allowedEmails` fails loudly instead of locking the client out silently.
+Every field required. Unknown fields are rejected rather than ignored, so a typo fails loudly
+instead of being silently ignored.
+
+**Permitted sign-ins are not here.** They are deployment configuration (`ALLOWED_EMAILS`), so
+that write access to the site's repository cannot grant access to the editing interface
+(FR-003c1). The schema rejects an `allowedEmails` key outright rather than ignoring it, so a
+developer who puts it here is told, not quietly disregarded.
 
 **On invalid content**: the previous valid settings stay in force, the fault is reported to the
 last known `alertContact`, and the interface shows a configuration warning to configuration

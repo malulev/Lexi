@@ -240,10 +240,14 @@ with the conversation still usable.
 - **FR-003b**: System MUST validate its configuration at startup and report a specific,
   actionable error for each unreachable or invalid setting, rather than failing at the
   first client request.
-- **FR-003c**: Non-secret settings — permitted sign-ins, cost ceiling, alert contact —
-  MUST be read from a declared location in the site's own repository, alongside the site's
-  policy and agent guidance, so that changing them is a reviewable, versioned edit rather
-  than a redeployment.
+- **FR-003c**: Non-secret operational settings — cost ceiling, alert contact, model, maximum
+  request duration — MUST be read from a declared location in the site's own repository,
+  alongside the site's policy and agent guidance, so that changing them is a reviewable,
+  versioned edit rather than a redeployment.
+- **FR-003c1**: The identities permitted to sign in MUST be supplied as deployment
+  configuration, not from the site's repository, so that write access to the repository does
+  not confer the ability to grant access to the editing interface. Changing who may sign in
+  is an act of the person who operates the installation.
 - **FR-003d**: Secrets MUST NOT be stored in the site's repository. They MUST be supplied
   as deployment configuration.
 - **FR-003e**: System MUST forbid the agent from changing the declared location holding
@@ -467,9 +471,10 @@ than duplicated.
   clients and are the trigger conditions for revisiting the decision.
 - Conversation history recorded against a site's repository is visible to anyone with
   access to that repository — in practice, the site's own developer.
-- Because the permitted sign-in addresses live in the site's repository, write access to that
-  repository is equivalent to the ability to grant access to the editing interface. This is
-  accepted: the parties with repository write access are the site's own developers.
+- Permitted sign-in addresses are deployment configuration rather than repository content, so
+  repository write access does not confer access to the editing interface. The cost accepted in
+  exchange is that adding or removing a client user is an operator action against the
+  deployment, not a commit.
 - Preview addresses are unlisted rather than access-controlled. Anyone holding a preview link
   can view the pending change.
 

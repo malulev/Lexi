@@ -1,8 +1,8 @@
 # Contract: HTTP Interface
 
 All routes require a valid session cookie unless stated. Session identity must appear in the
-installation's `allowedEmails`, checked per request rather than at sign-in only, so removing an
-address takes effect immediately.
+installation's configured `ALLOWED_EMAILS`, checked per request rather than at sign-in only, so
+removing an address takes effect on the next request.
 
 ## Authentication
 

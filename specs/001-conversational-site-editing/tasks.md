@@ -50,9 +50,9 @@ image under `agent/`. Per plan.md Structure Decision.
 
 ### Configuration
 
-- [ ] T008 [P] Write failing tests for the environment schema in `tests/unit/config/env.test.ts`: every required variable, rejection of malformed repository references, and a readable aggregated error naming each fault
+- [ ] T008 [P] Write failing tests for the environment schema in `tests/unit/config/env.test.ts`: every required variable, rejection of malformed repository references, a non-empty `ALLOWED_EMAILS` list normalised to lower case, and a readable aggregated error naming each fault
 - [ ] T009 Implement the environment schema and loader in `src/lib/config/env.ts` using zod, failing fast at import time
-- [ ] T010 [P] Write failing tests for settings parsing in `tests/unit/config/settings.test.ts` covering valid input, unknown-field rejection, empty `allowedEmails` rejection, and `maxRequestMinutes` bounds
+- [ ] T010 [P] Write failing tests for settings parsing in `tests/unit/config/settings.test.ts` covering valid input, unknown-field rejection, explicit rejection of an `allowedEmails` key with a message pointing to deployment configuration, and `maxRequestMinutes` bounds
 - [ ] T011 Implement `.webagent/config.yml` parsing and validation in `src/lib/config/settings.ts` per contracts/repo-files.md
 - [ ] T012 [P] Write failing tests in `tests/unit/config/cache.test.ts` proving that invalid settings leave the previously valid settings in force and surface a fault, never falling open
 - [ ] T013 Implement the settings cache with last-known-good retention in `src/lib/config/cache.ts` (FR-003f)
@@ -87,11 +87,11 @@ image under `agent/`. Per plan.md Structure Decision.
 
 ### Authentication
 
-- [ ] T030 [P] Write failing tests in `tests/unit/auth/magic-link.test.ts`: token signing and verification, expiry, single use within its window, and that an address absent from `allowedEmails` produces no token
+- [ ] T030 [P] Write failing tests in `tests/unit/auth/magic-link.test.ts`: token signing and verification, expiry, single use within its window, and that an address absent from the configured `ALLOWED_EMAILS` produces no token
 - [ ] T031 Implement magic-link token issue and verification in `src/lib/auth/magic-link.ts`
 - [ ] T032 [P] Write failing tests in `tests/unit/auth/session.test.ts` for signed cookie issue, verification, tamper rejection, and expiry
 - [ ] T033 Implement the session cookie in `src/lib/auth/session.ts`
-- [ ] T034 [P] Write a failing test in `tests/unit/auth/authorize.test.ts` proving authorization is re-checked against current `allowedEmails` on every request, so removing an address takes effect immediately
+- [ ] T034 [P] Write a failing test in `tests/unit/auth/authorize.test.ts` proving authorization is re-checked against the configured `ALLOWED_EMAILS` on every request, and a failing test proving an `allowedEmails` key in the repository settings grants nobody access (FR-003c1)
 - [ ] T035 Implement the single authorization choke point in `src/lib/auth/authorize.ts` (Principle VI)
 
 ### Repository working copies
