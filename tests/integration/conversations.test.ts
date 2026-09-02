@@ -552,3 +552,68 @@ describe('an agent whose container exits non-zero', () => {
     expect(await branchExists(harness.originDir, pullRequest.headRef)).toBe(false);
   });
 });
+
+/**
+ * Constitution V ties cost accountability to every request, not to the ones
+ * that happened to succeed. A blocked request has already paid the model in
+ * full — the spend is identical, only the outcome differs — so a record that
+ * omits it under-reports what the installation actually costs, and does so
+ * precisely for the requests a developer is most likely to be investigating.
+ */
+describe('what a request records about its own cost', () => {
+  it('reports tokens and spend even when the gate refuses the change', async () => {
+    harness = await createHarness({
+      script: {
+        result: {
+          summary: 'I added the note you asked for.',
+          filesChanged: ['README.md'],
+          tokensIn: 6390,
+          tokensOut: 76,
+          costUsd: 0.02,
+        },
+        async edit(workDir: string) {
+          await writeFile(join(workDir, 'README.md'), 'A note about this site.\n', 'utf8');
+        },
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Add a README',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    expect(outcome.record.outcome).toBe('blocked');
+    expect(outcome.record.tokensIn).toBe(6390);
+    expect(outcome.record.tokensOut).toBe(76);
+    expect(outcome.record.costUsd).toBe(0.02);
+  });
+
+  it('reports them when the agent itself fails, since the tokens were still spent', async () => {
+    harness = await createHarness({
+      script: {
+        exitCode: 1,
+        result: { summary: '', filesChanged: [], tokensIn: 1200, tokensOut: 4, costUsd: 0.003 },
+        async edit() {},
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Add a README',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    expect(outcome.record.outcome).toBe('failed');
+    expect(outcome.record.tokensIn).toBe(1200);
+    expect(outcome.record.costUsd).toBe(0.003);
+  });
+});

@@ -143,14 +143,29 @@ async function execute(
 
     const agent = await runAgent(deps, requestId, prepared);
     if (agent.failure) {
-      return finish(deps, input, machine, { requestId, startedAt, ...agent.failure });
+      // The spend is carried into every ending, not just the successful one:
+      // a request that failed cost exactly what it cost, and a record omitting
+      // that under-reports the installation precisely where a developer is
+      // most likely to be looking (constitution V).
+      return finish(deps, input, machine, {
+        requestId,
+        startedAt,
+        ...agent.cost,
+        ...agent.failure,
+      });
     }
 
     machine.advance('gating');
     const verdict = await judge(deps, tree, agent.cost);
     if (verdict.failure) {
       machine.advance(verdict.failure.outcome === 'blocked' ? 'blocked' : 'failed');
-      return finish(deps, input, machine, { requestId, startedAt, ...verdict.failure }, true);
+      return finish(
+        deps,
+        input,
+        machine,
+        { requestId, startedAt, ...agent.cost, ...verdict.failure },
+        true,
+      );
     }
 
     machine.advance('pushing');
