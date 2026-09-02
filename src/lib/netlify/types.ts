@@ -45,18 +45,26 @@ export interface Deploy {
 // src/lib/policy/parse.ts, and deliberately so: a settings typo there is a
 // developer's mistake to catch; an unknown field here is a provider's
 // business, not this installation's to reject.
+// Confirmed against a live Netlify site on 2026-09-02: every field but `id`
+// and `state` may arrive as an explicit `null` rather than being omitted. A
+// production or branch deploy has no pull request and a successful one has no
+// error, and Netlify says so with `null`. Treating these as merely optional
+// rejected the first real response this installation ever read, after the
+// change had already been committed and pushed — so `nullish` here is not
+// defensive vagueness, it is the shape the provider sends.
 export const rawDeploySchema = z
   .object({
     id: z.string(),
     state: z.string(),
-    context: z.string().optional(),
-    branch: z.string().optional(),
-    commit_ref: z.string().optional(),
-    review_id: z.number().optional(),
-    deploy_url: z.string().optional(),
-    ssl_url: z.string().optional(),
-    error_message: z.string().optional(),
-    created_at: z.string().optional(),
+    context: z.string().nullish(),
+    branch: z.string().nullish(),
+    commit_ref: z.string().nullish(),
+    review_id: z.number().nullish(),
+    deploy_url: z.string().nullish(),
+    deploy_ssl_url: z.string().nullish(),
+    ssl_url: z.string().nullish(),
+    error_message: z.string().nullish(),
+    created_at: z.string().nullish(),
   })
   .passthrough();
 
@@ -96,20 +104,27 @@ function mapContext(raw: string | undefined): DeployContext {
  *
  * Unknown states and contexts fall through to `'other'` rather than
  * throwing — a provider that adds a state must not break the installation.
- * `deployUrl` prefers `deploy_url` and falls back to `ssl_url`, since which
- * of the two names Netlify actually sends is itself part of what this
- * module cannot verify from here (see the reconciliation note).
+ * `deployUrl` takes `deploy_ssl_url` first and `deploy_url` second, and never
+ * `ssl_url` or `url`. Those last two describe the live site rather than this
+ * deploy — confirmed against a live response, where a preview deploy carried
+ * `ssl_url: https://amit-malul-lev.netlify.app` alongside its own
+ * `deploy_ssl_url`. Falling back to them would hand a client their production
+ * site labelled as a preview, which is the one thing they must never approve
+ * by mistake (Principle II). https is preferred because this URL is given to a
+ * person to open.
  */
 export function toDeploy(raw: RawDeploy): Deploy {
+  // `null` and absent both mean "Netlify has nothing to say here", and the
+  // rest of the installation should not have to tell them apart.
   return {
     id: raw.id,
     state: mapState(raw.state),
-    context: mapContext(raw.context),
-    commitRef: raw.commit_ref,
-    reviewId: raw.review_id,
-    deployUrl: raw.deploy_url ?? raw.ssl_url,
-    errorMessage: raw.error_message,
-    createdAt: raw.created_at,
+    context: mapContext(raw.context ?? undefined),
+    commitRef: raw.commit_ref ?? undefined,
+    reviewId: raw.review_id ?? undefined,
+    deployUrl: raw.deploy_ssl_url ?? raw.deploy_url ?? undefined,
+    errorMessage: raw.error_message ?? undefined,
+    createdAt: raw.created_at ?? undefined,
   };
 }
 

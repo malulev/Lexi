@@ -186,3 +186,93 @@ describe('createNetlifyClient · getSite', () => {
     await expect(client.getSite()).rejects.toThrow(/site_fixture/);
   });
 });
+
+/**
+ * What Netlify actually sends, confirmed against a live site on 2026-09-02.
+ *
+ * A branch or production deploy has no pull request and no error, and Netlify
+ * expresses that as an explicit `null` rather than by omitting the field. The
+ * schema had these as optional-but-typed, so the first real response rejected
+ * the whole list and the request failed after the change had already been
+ * pushed — everything worked except reading the answer back.
+ */
+describe('createNetlifyClient · the nulls a live Netlify sends', () => {
+  const liveShape = [
+    {
+      id: 'deploy-branch',
+      state: 'ready',
+      context: 'production',
+      branch: 'main',
+      commit_ref: 'aaaaaaaaaaaa',
+      review_id: null,
+      deploy_url: 'https://main--client.netlify.app',
+      error_message: null,
+      created_at: '2026-09-02T18:20:00Z',
+    },
+    {
+      id: 'deploy-preview',
+      state: 'ready',
+      context: 'deploy-preview',
+      branch: 'webagent/c-2',
+      commit_ref: 'e53ede9365dc',
+      review_id: 1,
+      // The four URL fields a real deploy carries. `ssl_url` and `url` describe
+      // the PRODUCTION site, not this deploy — only the `deploy_` pair points
+      // at the preview.
+      deploy_url: 'http://deploy-preview-1--client.netlify.app',
+      deploy_ssl_url: 'https://deploy-preview-1--client.netlify.app',
+      url: 'http://client.netlify.app',
+      ssl_url: 'https://client.netlify.app',
+      error_message: null,
+      created_at: '2026-09-02T18:20:30Z',
+    },
+  ];
+
+  it('accepts a deploy whose review_id and error_message are null', async () => {
+    const client = createNetlifyClient(env, {
+      fetch: fakeFetch({
+        '/api/v1/sites/site_fixture/deploys': () => jsonResponse(liveShape),
+      }),
+    });
+
+    const deploys = await client.listDeploys();
+
+    // Selected by id, not by position: the client orders deploys itself.
+    const production = deploys.find((deploy) => deploy.id === 'deploy-branch');
+
+    expect(deploys).toHaveLength(2);
+    expect(production?.reviewId).toBeUndefined();
+    expect(production?.errorMessage).toBeUndefined();
+    expect(production?.deployUrl).toBe('https://main--client.netlify.app');
+  });
+
+  it('still correlates the preview by pull request number', async () => {
+    const client = createNetlifyClient(env, {
+      fetch: fakeFetch({
+        '/api/v1/sites/site_fixture/deploys': () => jsonResponse(liveShape),
+      }),
+    });
+
+    const found = await client.findDeployByPullRequest(1);
+
+    expect(found?.id).toBe('deploy-preview');
+    expect(found?.deployUrl).toContain('deploy-preview-1');
+  });
+
+  it('gives the client the preview over http, never the production site', async () => {
+    // The dangerous confusion this guards: `ssl_url` on a deploy is the live
+    // site. Falling back to it would hand a client their own production site
+    // and call it a preview, which is the one thing they must never approve by
+    // mistake (Principle II).
+    const client = createNetlifyClient(env, {
+      fetch: fakeFetch({
+        '/api/v1/sites/site_fixture/deploys': () => jsonResponse(liveShape),
+      }),
+    });
+
+    const found = await client.findDeployByPullRequest(1);
+
+    expect(found?.deployUrl).toBe('https://deploy-preview-1--client.netlify.app');
+    expect(found?.deployUrl).not.toBe('https://client.netlify.app');
+  });
+});
