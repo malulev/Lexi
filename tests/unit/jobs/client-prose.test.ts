@@ -37,6 +37,18 @@ describe('what a client is allowed to read', () => {
     expect(prose).not.toContain('Hero.tsx');
   });
 
+  it('redacts a filename with a line reference, the shape a live run produced', () => {
+    // Unbackticked, and the line number trails the filename rather than
+    // sitting inside it — a client has no use for either half.
+    const real = 'Done. Changed "Built for speed" to "Built to move fast" in index.html:54.';
+
+    const prose = toClientProse(real);
+
+    expect(prose).not.toContain('index.html');
+    expect(prose).not.toContain(':54');
+    expect(prose).toContain('Built to move fast');
+  });
+
   it('redacts a bare filename', () => {
     expect(toClientProse('Edited styles.css to widen the header.')).not.toContain('styles.css');
   });

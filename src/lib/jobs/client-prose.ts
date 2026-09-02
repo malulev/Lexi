@@ -41,7 +41,11 @@ const URL = /\bhttps?:\/\/\S+/gi;
  * `/work/index.html:54`, `webagent/c-2` and `styles.css` alike, and a false
  * positive costs a vaguer sentence while a false negative costs the principle.
  */
-const PATH_LIKE = /(?:`[^`]*`|[^\s`"'()[\]{}]*\/[^\s`"'()[\]{}]+|\b[\w.-]+\.[a-zA-Z]{1,5}\b)/g;
+const LINE_REFERENCE = '(?::\\d+(?::\\d+)?)?';
+const PATH_LIKE = new RegExp(
+  `(?:\`[^\`]*\`|[^\\s\`"'()\\[\\]{}]*\\/[^\\s\`"'()\\[\\]{}]+${LINE_REFERENCE}|\\b[\\w.-]+\\.[a-zA-Z]{1,5}${LINE_REFERENCE}\\b)`,
+  'g',
+);
 
 /** Seven or more hex characters standing alone: a commit SHA, abbreviated or not. */
 const SHA_LIKE = /\b[0-9a-f]{7,40}\b/gi;
@@ -67,6 +71,9 @@ function redactPathLike(text: string): string {
 /** Whatever the redaction missed. If this finds anything, the summary is not used. */
 function stillLooksUnsafe(text: string): boolean {
   if (/[/\\]/.test(text)) return true;
+  // A line reference the redaction left stranded — `that part of the site:54`
+  // tells a client nothing and is still a code detail.
+  if (new RegExp(`${REDACTED}:\\d`).test(text)) return true;
   if (SHA_LIKE.test(text)) return true;
   if (URL.test(text)) return true;
   if (/```|~~~|<[a-zA-Z]/.test(text)) return true;
