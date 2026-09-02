@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { RepoClient } from '@/lib/github/types';
 import type { JobBus } from '@/lib/jobs/bus';
 import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
+import { toClientProse } from '@/lib/jobs/client-prose';
 import { assemblePrompt } from '@/lib/jobs/prompt';
 import { waitForPreview } from '@/lib/jobs/preview';
 import { pushBranch } from '@/lib/jobs/push';
@@ -67,6 +68,8 @@ export interface RunInput {
   history: Message[];
   targetHint?: string;
   buildFailureDetail?: string;
+  /** Paths the gate already refused in this conversation, derived from its records. */
+  refusedPaths?: string[];
   requestId?: string;
 }
 
@@ -237,6 +240,7 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
     guidance: deps.config.guidance,
     ...(input.targetHint ? { targetHint: input.targetHint } : {}),
     ...(input.buildFailureDetail ? { buildFailureDetail: input.buildFailureDetail } : {}),
+    ...(input.refusedPaths?.length ? { refusedPaths: input.refusedPaths } : {}),
   });
   // Passing the working tree here is not redundant: it is what lets the control
   // writer refuse a control directory nested inside the tree, rather than
@@ -429,7 +433,11 @@ function settle(
       ...shared,
       outcome: 'succeeded',
       previewUrl: preview.previewUrl,
-      prose: `${input.agent.summary}\n\nYour preview is ready.`,
+      // The summary is unbounded model output, and this is a client surface.
+      // Principle III is explicit that the prohibition in Principle I is
+      // machine-enforced, so it is redacted here rather than asked for in a
+      // prompt (see toClientProse).
+      prose: `${toClientProse(input.agent.summary)}\n\nYour preview is ready.`,
     };
   }
 

@@ -1,5 +1,6 @@
 import {
   branchFor,
+  collectRefusedPaths,
   lastBuildFailureDetail,
   readConversation,
   renderClientMessage,
@@ -39,6 +40,9 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
 
   const defaultBranch = await client.getDefaultBranch();
   const buildFailureDetail = lastBuildFailureDetail(detail.records);
+  // Read from the records, never from the messages: the messages are what the
+  // client is served, and a file path may not appear there (Principle I).
+  const refusedPaths = collectRefusedPaths(detail.records);
 
   return beginRequest(
     {
@@ -61,6 +65,7 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
       history: detail.messages,
       ...(input.targetHint ? { targetHint: input.targetHint } : {}),
       ...(buildFailureDetail ? { buildFailureDetail } : {}),
+      ...(refusedPaths.length ? { refusedPaths } : {}),
     },
   );
 }

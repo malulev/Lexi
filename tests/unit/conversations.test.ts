@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { claimConversationBranch, readConversation, renderClientMessage } from '@/lib/conversations';
+import {
+  claimConversationBranch,
+  collectRefusedPaths,
+  readConversation,
+  renderClientMessage,
+} from '@/lib/conversations';
 import { createFakeRepoClient } from '@/lib/github/fake';
 import { renderRecord } from '@/lib/record';
 import type { RequestRecord } from '@/types';
@@ -153,5 +158,66 @@ describe('readConversation', () => {
       ['agent', 'Your preview is ready.'],
       ['client', 'Now make it dark blue'],
     ]);
+  });
+});
+
+/**
+ * A refused path is a file path, so Principle I keeps it out of `Message` — the
+ * shape `GET /api/conversations/[number]` serialises straight to the client.
+ * It is derived from the records instead, which no client surface reads.
+ */
+describe('collectRefusedPaths', () => {
+  const blocked = (path: string, requestId: string): RequestRecord =>
+    recordFor({
+      requestId,
+      outcome: 'blocked',
+      violation: 'not_allowed_path',
+      blockedPath: path,
+      previewUrl: undefined,
+    });
+
+  it('finds nothing when no request was ever blocked', () => {
+    expect(collectRefusedPaths([recordFor(), recordFor({ requestId: 'r_2' })])).toEqual([]);
+  });
+
+  it('names a path the policy refused, so the next attempt is told not to try it', () => {
+    expect(collectRefusedPaths([blocked('README.md', 'r_1')])).toEqual(['README.md']);
+  });
+
+  it('keeps every refusal in the conversation, not only the most recent one', () => {
+    const records = [
+      blocked('README.md', 'r_1'),
+      recordFor({ requestId: 'r_2' }),
+      blocked('config/payments.json', 'r_3'),
+    ];
+
+    expect(collectRefusedPaths(records)).toEqual(['README.md', 'config/payments.json']);
+  });
+
+  it('names each path once however often it was refused', () => {
+    const records = [blocked('README.md', 'r_1'), blocked('README.md', 'r_2')];
+    expect(collectRefusedPaths(records)).toEqual(['README.md']);
+  });
+
+  it('ignores a block that named no path, such as one over a size limit', () => {
+    const records = [
+      recordFor({ requestId: 'r_1', outcome: 'blocked', violation: 'too_many_files', previewUrl: undefined }),
+    ];
+
+    expect(collectRefusedPaths(records)).toEqual([]);
+  });
+
+  it('reads the refusal from the records while the client sees no path at all', async () => {
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+    const number = await openConversation(client);
+    await client.createComment(
+      number,
+      renderRecord('Your developer has protected this part of the site.', blocked('README.md', 'r_1')),
+    );
+
+    const detail = await readConversation(client, number);
+
+    expect(collectRefusedPaths(detail!.records)).toEqual(['README.md']);
+    expect(JSON.stringify(detail!.messages)).not.toContain('README.md');
   });
 });

@@ -83,3 +83,110 @@ describe('assembling the prompt for one job', () => {
     expect(history).toEqual(snapshot);
   });
 });
+
+/**
+ * A conversation that was blocked once used to stay blocked forever: the
+ * refused turn sat in history looking outstanding, so the next container
+ * re-attempted it and was refused again. These fix the two facts that ends it.
+ */
+describe('an attempt the policy refused', () => {
+  function agentTurn(overrides: Partial<Message>): Message {
+    return { ...message('agent', 'Your developer has protected this part of the site.', 7), ...overrides };
+  }
+
+  it('renders a blocked turn so the agent can tell it was never applied', () => {
+    const prompt = assemblePrompt({
+      request: 'x',
+      history: [agentTurn({ outcome: 'blocked', errorCode: 'blocked_by_policy' })],
+      guidance: '',
+    });
+
+    const turn = prompt.history[0]!;
+    expect(turn.text).toContain('Your developer has protected this part of the site.');
+    expect(turn.text).not.toBe('Your developer has protected this part of the site.');
+    expect(turn.text.toLowerCase()).toContain('refused');
+    expect(Object.keys(turn).sort()).toEqual(['author', 'text']);
+  });
+
+  it('renders a failed turn as not applied either', () => {
+    const prompt = assemblePrompt({
+      request: 'x',
+      history: [agentTurn({ text: 'The change broke the site build.', outcome: 'failed', errorCode: 'build_failed' })],
+      guidance: '',
+    });
+
+    expect(prompt.history[0]!.text).toContain('The change broke the site build.');
+    expect(prompt.history[0]!.text.toLowerCase()).toContain('not applied');
+  });
+
+  it('leaves a successful turn and a client turn exactly as they were written', () => {
+    const prompt = assemblePrompt({
+      request: 'x',
+      history: [
+        message('client', 'Add a README', 1),
+        agentTurn({ text: 'Your preview is ready.', outcome: 'succeeded' }),
+      ],
+      guidance: '',
+    });
+
+    expect(prompt.history).toEqual([
+      { author: 'client', text: 'Add a README' },
+      { author: 'agent', text: 'Your preview is ready.' },
+    ]);
+  });
+
+  it('names the refused paths in the request, so the agent stops re-attempting them', () => {
+    const prompt = assemblePrompt({
+      request: 'Change the headline to Built for speed.',
+      history: [],
+      guidance: '',
+      refusedPaths: ['README.md'],
+    });
+
+    expect(prompt.request).toContain('Change the headline to Built for speed.');
+    expect(prompt.request).toContain('README.md');
+  });
+
+  it('names each refused path once, however many attempts were refused', () => {
+    const prompt = assemblePrompt({
+      request: 'x',
+      history: [],
+      guidance: '',
+      refusedPaths: ['README.md', 'README.md', 'config/payments.json', 'README.md'],
+    });
+
+    expect(prompt.request.match(/README\.md/g)).toHaveLength(1);
+    expect(prompt.request).toContain('config/payments.json');
+  });
+
+  it('says nothing about refused paths when nothing has been refused', () => {
+    expect(assemblePrompt({ request: 'Make it blue', history: [], guidance: '' }).request).toBe('Make it blue');
+    expect(
+      assemblePrompt({ request: 'Make it blue', history: [], guidance: '', refusedPaths: [] }).request,
+    ).toBe('Make it blue');
+  });
+
+  it('tells the agent about both a refused path and a broken build at once', () => {
+    const prompt = assemblePrompt({
+      request: 'Fix it',
+      history: [],
+      guidance: '',
+      buildFailureDetail: "Module not found: Can't resolve './Hero'",
+      refusedPaths: ['README.md'],
+    });
+
+    expect(prompt.request).toContain('README.md');
+    expect(prompt.request).toContain("Can't resolve './Hero'");
+  });
+
+  it('still drops the oldest turns, and marks the refused ones that survive', () => {
+    const history: Message[] = Array.from({ length: 50 }, (_, i) => message('client', `turn ${i}`, i));
+    history[49] = agentTurn({ id: 49, outcome: 'blocked', errorCode: 'blocked_by_policy' });
+
+    const prompt = assemblePrompt({ request: 'x', history, guidance: '' });
+
+    expect(prompt.history).toHaveLength(20);
+    expect(prompt.history[0]?.text).toBe('turn 30');
+    expect(prompt.history.at(-1)!.text.toLowerCase()).toContain('refused');
+  });
+});

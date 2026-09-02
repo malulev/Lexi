@@ -6,6 +6,7 @@ import { beginRequest, runRequest } from '@/lib/jobs/run';
 import {
   branchFor,
   claimConversationBranch,
+  collectRefusedPaths,
   readConversation,
   renderClientMessage,
 } from '@/lib/conversations';
@@ -615,5 +616,66 @@ describe('what a request records about its own cost', () => {
     expect(outcome.record.outcome).toBe('failed');
     expect(outcome.record.tokensIn).toBe(1200);
     expect(outcome.record.costUsd).toBe(0.003);
+  });
+});
+
+/**
+ * The bug this was written for: one blocked request used to poison the whole
+ * conversation. The refused turn stayed in history looking outstanding, the
+ * next container re-attempted the same forbidden path, and no later request in
+ * that conversation could ever succeed.
+ */
+describe('a conversation that has already been blocked once', () => {
+  /** The observed failure: the agent writes the same forbidden file every time. */
+  const writesAReadme = {
+    result: {
+      summary: 'I added a README.',
+      filesChanged: ['README.md'],
+      tokensIn: 10,
+      tokensOut: 5,
+      costUsd: 0.1,
+    },
+    async edit(workDir: string) {
+      await writeFile(join(workDir, 'README.md'), '# About this site\n', 'utf8');
+    },
+  };
+
+  it('tells the next request which path was refused, so it stops re-attempting it', async () => {
+    harness = await createHarness({ script: writesAReadme });
+    const pullRequest = await openConversation(harness.client);
+    harness.netlify.addDeploy(previewDeploy(pullRequest.number));
+
+    const first = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Add a README.md at the top level with a short note about this site',
+      history: [],
+    });
+
+    expect(first.started).toBe(true);
+    if (!first.started) throw new Error('the request should have started');
+    expect(first.outcome).toBe('blocked');
+
+    // Exactly what the route does between two requests: read the conversation
+    // back, and derive the refusals from the records rather than the messages.
+    const detail = await readConversation(harness.client, pullRequest.number);
+    const refusedPaths = collectRefusedPaths(detail!.records);
+    expect(refusedPaths).toEqual(['README.md']);
+
+    await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'On the homepage, change the headline to Built for speed',
+      history: detail!.messages,
+      refusedPaths,
+    });
+
+    const second = harness.runner.calls[1]!.prompt;
+    expect(second.request).toContain('README.md');
+    expect(second.request).toContain('Built for speed');
+    // And the refused turn no longer reads as an outstanding one.
+    expect(second.history.at(-1)!.text.toLowerCase()).toContain('refused');
   });
 });

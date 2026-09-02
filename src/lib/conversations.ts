@@ -201,6 +201,30 @@ export function lastBuildFailureDetail(records: RequestRecord[]): string | undef
   return last.errorDetail;
 }
 
+/**
+ * Every path the gate has refused in this conversation, so the next attempt is
+ * told what not to try again.
+ *
+ * All of the records, not just the recent ones. A refusal is the policy
+ * speaking, and the policy is a property of the repository rather than of a
+ * moment: a path refused on the second request is still refused on the
+ * twentieth unless a developer edits `policy.yml`, and the observed bug was an
+ * agent re-attempting a refusal several turns old. The list is bounded by the
+ * number of blocked requests in one conversation, at most one path each, so it
+ * cannot grow the way history can. A stale entry after a developer widens the
+ * policy costs one path the agent leaves alone; the gate, not the prompt,
+ * remains the boundary (Principle III).
+ *
+ * The paths stay here, derived from the records. `Message` is serialised
+ * straight to the client, and a path in it would be a Principle I breach.
+ */
+export function collectRefusedPaths(records: RequestRecord[]): string[] {
+  const paths = records.flatMap((record) =>
+    record.outcome === 'blocked' && record.blockedPath ? [record.blockedPath] : [],
+  );
+  return [...new Set(paths)];
+}
+
 /** A title a client would recognise, drawn from their own words. */
 export function titleFor(message: string): string {
   const firstLine = message.trim().split('\n')[0]?.trim() ?? 'Website change';
