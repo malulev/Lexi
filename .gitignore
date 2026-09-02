@@ -5,3 +5,8 @@ node_modules/
 !.env.example
 .DS_Store
 *.log
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+coverage/
+test-results/
+playwright-report/
