@@ -208,7 +208,8 @@ with the conversation still usable.
 - **FR-001**: System MUST require authentication for all client-facing surfaces.
 - **FR-002**: System MUST scope every site, conversation, message, and deploy record to a
   single client organisation, and MUST prevent any member of one organisation from
-  reading or acting on another's data.
+  reading or acting on another's data, including through credentials held by the system on
+  their behalf.
 - **FR-003**: Operators MUST be able to create a site, associate it with a client's code
   repository and hosting, and invite client users by email.
 - **FR-004**: Clients MUST NOT be exposed to repository, hosting, or branch configuration.
@@ -223,8 +224,11 @@ with the conversation still usable.
   and MUST queue further requests, showing their queued state.
 - **FR-008**: System MUST stream progress stages for an in-flight request to all viewers
   of that conversation without requiring a page refresh.
-- **FR-009**: System MUST persist the full ordered history of a conversation, including
-  progress stages and failures, so a client returning later sees exactly what happened.
+- **FR-009**: System MUST retain a durable, ordered history of every completed step of a
+  conversation, including outcomes and failures, so a client returning later — including
+  after a restart of the system — sees what happened and why. Live output produced while a
+  request is running MAY be ephemeral, provided its outcome is recorded durably when the
+  request ends.
 - **FR-010**: System MUST present a plain-language summary of what changed, and MUST NOT
   require the client to read code, diffs, file paths, or build logs.
 
@@ -235,8 +239,9 @@ with the conversation still usable.
   site-specific guidance declared in the repository.
 - **FR-012**: System MUST enforce a maximum duration for a single request and MUST end the
   attempt cleanly when exceeded.
-- **FR-013**: System MUST record, per request, the model used, tokens consumed, and cost,
-  attributable to the site and organisation.
+- **FR-013**: System MUST make the model used, tokens consumed, and cost of each request
+  retrievable and attributable to the site and organisation. The record MAY live in an
+  external system rather than in the product.
 - **FR-014**: System MUST stop a request and alert the operator when its cost exceeds a
   configured ceiling.
 - **FR-015**: The agent's execution environment MUST NOT hold any credential capable of
@@ -284,7 +289,8 @@ with the conversation still usable.
   the site and MUST either update it before publishing or block publishing with a clear
   explanation.
 - **FR-031**: System MUST record every approval and undo with actor, site, change, and
-  timestamp in an append-only audit record.
+  timestamp, in a form that cannot be altered after the fact and that survives loss of the
+  running system.
 
 **Notifications**
 
@@ -315,13 +321,18 @@ with the conversation still usable.
   system. System messages carry progress and failures.
 - **Request (job)**: One attempt by the agent to satisfy a message. Has a stage, an
   outcome, a duration, and a recorded cost.
-- **Request event**: An ordered, append-only record of a stage change or agent output
-  within a request. The source of streamed progress and of after-the-fact reconstruction.
+- **Request event**: An ordered record of a stage change or agent output within a request.
+  Drives streamed progress while the request runs; its durable residue is the outcome
+  recorded when the request ends.
 - **Preview**: A private, viewable build of a pending change, with its status and address.
 - **Publication**: A record of a change made public, and of any undo applied to it.
 - **Policy**: The declared, machine-readable limits on what a site's agent may change.
-- **Audit record**: An immutable record of who approved, published, or undid what, and
+- **Audit record**: An unalterable record of who approved, published, or undid what, and
   when.
+
+Entities describe concepts the product reasons about, not storage. Where an entity already
+exists in the version control system or the hosting provider, it is read from there rather
+than duplicated.
 
 ## Success Criteria *(mandatory)*
 
@@ -367,3 +378,28 @@ with the conversation still usable.
   selection is out of scope for this phase.
 - Clients access the dashboard on desktop browsers; the dashboard itself need not be
   mobile-optimised, though previews must be viewable at mobile widths.
+- The version control system and the hosting provider are the system of record. The
+  product introduces no application database in this phase; durable state is limited to a
+  small configuration of which sites exist and who may access them. Requirements are
+  written so that they can be satisfied by reading from and writing back to those systems.
+- Accepting that constraint means accepting its consequences at pilot scale: dashboard
+  reads are bounded by third-party API latency and rate limits, concurrency control is
+  process-local, and cross-site reporting is unavailable. These are acceptable for 3-5
+  clients and are the trigger conditions for revisiting the decision.
+- Conversation history recorded against a site's repository is visible to anyone with
+  access to that repository — in practice, the site's own developer.
+
+## Open Decisions
+
+Deliberately unresolved here; to be settled during planning, not by assumption.
+
+- **OD-001**: Where the small configuration of sites and permitted users lives, and how it
+  is edited by an operator.
+- **OD-002**: Whether a finished request's durable outcome is written back to the version
+  control system, to a log store, or both — and in what form the client-facing history is
+  rendered from it.
+- **OD-003**: How at-most-one-in-flight-request-per-site is enforced without shared
+  storage, and what happens to that guarantee if the system runs as more than one process.
+- **OD-004**: How email notification is made idempotent without a delivery record.
+- **OD-005**: What the trigger conditions are for introducing a datastore, stated
+  concretely enough to recognise when they are met.

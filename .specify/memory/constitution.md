@@ -30,32 +30,47 @@ boundary. A change that violates the policy is discarded, not negotiated.
 ### IV. Test-First (NON-NEGOTIABLE)
 
 TDD is mandatory: write the failing test, get it approved, watch it fail, then
-implement. The policy gate, the job state machine, and every RLS rule ship with tests
-written before their implementation. Agent behavior is tested against recorded fixtures,
+implement. The policy gate, the job state machine, and every authorization rule ship
+with tests written before their implementation. Agent behavior is tested against recorded fixtures,
 never against live client repositories.
 
 ### V. Observability and Cost Accountability
 
-Every job emits an ordered, append-only event stream: stage transitions, agent output,
-diff summary, deploy status. Every job records model, token counts, and cost in USD,
-attributable to a site and an organization. Errors are logged with the job id, site id,
-and stage. If a job's outcome cannot be reconstructed from stored events after the fact,
-the observability is incomplete.
+Every job emits an ordered stream of stage transitions, agent output, diff summary, and
+deploy status while it runs. Live output may be ephemeral; the job's outcome may not be.
+Every finished job writes a durable record of what it did, what it changed, and what it
+cost, attributable to a site and an organization, into a system of record that outlives
+the process. Errors are recorded with the job identifier, the site, and the stage. If a
+finished job's outcome cannot be reconstructed after a restart, the observability is
+incomplete.
 
 ### VI. Tenant Isolation by Default
 
-Isolation is enforced at the database layer through row-level security keyed on
-organization membership, not by application code remembering to filter. Secrets are
-never stored in ordinary tables. Agent execution is sandboxed per job, with no network
-access to version control and no long-lived credentials. A bug in a route handler must
-not be able to leak one client's data to another.
+Every request is authorized against the acting person's membership at a single choke
+point, not by each handler remembering to filter. Credentials are scoped per site and
+never shared across clients; secrets live in a secrets store, never alongside ordinary
+configuration. Agent execution is sandboxed per job, with no network access to version
+control and no long-lived credentials. A bug in one code path must not be able to expose
+one client's site or conversation to another.
 
-### VII. Ship the Smallest Thing That Proves the Loop
+### VII. State Lives Where It Already Lives
+
+The version control system and the hosting provider are the system of record. Pending
+changes, conversation history, published state, and the audit trail are read from them
+rather than mirrored into an application database. Phase 1 introduces no application
+database: durable state is limited to a small configuration describing which sites exist
+and who may access them. Anything else the product needs is either derived on read from
+the systems above, written back to them, or accepted as ephemeral. A datastore is added
+only against a named, observed pain — not in anticipation of one — and the decision is
+recorded when it is made.
+
+### VIII. Ship the Smallest Thing That Proves the Loop
 
 Scope is defended, not accumulated. The product's value is the loop — ask, preview,
 approve, live. Anything that does not shorten, harden, or clarify that loop waits.
 Deferred by explicit decision, not oversight: visual element picking, self-serve
-onboarding, container-side builds, multi-model routing, billing.
+onboarding, container-side builds, multi-model routing, billing, and any application
+datastore.
 
 ## Operational Constraints
 
@@ -74,8 +89,9 @@ messages add commits to that branch and refresh the same preview. Approval merge
 pull request. Undo reverts the merge and rebuilds production, so repository state and
 live state never diverge.
 
-**Concurrency.** At most one in-flight job per site, enforced by a database constraint
-rather than by application logic. Subsequent requests queue.
+**Concurrency.** At most one in-flight job per site. Subsequent requests queue. The
+mechanism is chosen at planning time and must not require an application database at
+phase-1 scale.
 
 **Latency budget.** Median time from client message to a live preview URL is under four
 minutes. Stage-by-stage progress is streamed so first meaningful feedback arrives within
@@ -86,8 +102,8 @@ sixty seconds. Regressions past this budget are treated as defects.
 - Specification precedes planning; planning precedes tasks; tasks precede code. Technical
   design decisions do not belong in the specification.
 - Every pull request states which principles it touches and how it complies.
-- The policy gate, authentication, RLS, and the job state machine require tests that fail
-  before the implementation exists.
+- The policy gate, authentication, authorization, and the job state machine require tests
+  that fail before the implementation exists.
 - Complexity must be justified in writing against Principle VII, or removed.
 - Client-facing copy is reviewed against Principle I before merge.
 
@@ -106,4 +122,4 @@ Versioning follows semantic rules: MAJOR for removing or redefining a principle,
 for adding a principle or materially expanding guidance, PATCH for clarifications that
 do not change meaning.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-02 | **Last Amended**: 2026-09-02
+**Version**: 1.1.0 | **Ratified**: 2026-09-02 | **Last Amended**: 2026-09-02

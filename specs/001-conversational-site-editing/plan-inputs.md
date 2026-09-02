@@ -3,13 +3,16 @@
 Not part of the specification. These are the technical directions already chosen with the
 maintainer, to be fed into the planning phase rather than re-litigated there.
 
-- **Dashboard + API**: Next.js App Router with Supabase (auth, Postgres with row-level
-  security, realtime for progress streaming).
+- **State**: no application database in phase 1. GitHub and Netlify are the system of
+  record; see Open Decisions OD-001 through OD-005 in the specification for what remains
+  unsettled. Earlier Supabase/Postgres direction is withdrawn.
+- **Dashboard + API**: Next.js App Router. Identity provider for sign-in only, not for
+  application data. Progress streamed to the browser directly from the running job.
 - **Agent harness**: OpenCode running against OpenRouter, executed inside a container.
 - **Job execution**: a `JobRunner` interface with a Docker implementation as the only
   v1 backend; hosted by the maintainer, but the compose stack must stay self-hostable.
-- **Queue**: the jobs table is the queue; a single worker loop with a Postgres advisory
-  lock per site. No Redis in v1.
+- **Queue**: single worker loop, one in-flight job per site, lock held in the running
+  process. No Redis, no jobs table (OD-003).
 - **Repository access**: GitHub App with short-lived per-job installation tokens. Push
   happens in the worker, never inside the agent container.
 - **Preview and publish**: the client's existing Netlify site with deploy previews per
