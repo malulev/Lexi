@@ -6,6 +6,7 @@ import { beginRequest, runRequest } from '@/lib/jobs/run';
 import { branchFor, readConversation, renderClientMessage } from '@/lib/conversations';
 import { parseComment } from '@/lib/record/record';
 import type { Deploy } from '@/lib/netlify/types';
+import { createFakeMailer, notifyOnce } from '@/lib/notify/email';
 import { branchExists, createHarness, readPushedFile, type Harness } from './harness';
 
 /**
@@ -325,5 +326,78 @@ describe('a request that changes nothing', () => {
     if (!outcome.started) throw new Error('the request should have started');
     expect(outcome.record.errorCode).toBe('nothing_to_change');
     expect(await branchExists(harness.originDir, pullRequest.headRef)).toBe(false);
+  });
+});
+
+describe('telling the client their preview is ready', () => {
+  it('sends once, and stays silent when asked to send the same event again (OD-004)', async () => {
+    harness = await createHarness({ script: editsTheHomepage('Built for speed') });
+    const pullRequest = await openConversation(harness.client, branchFor(1));
+    harness.netlify.addDeploy(previewDeploy(pullRequest.number));
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Change the homepage headline',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    const mailer = createFakeMailer();
+    const commentId = (await harness.client.listComments(pullRequest.number)).at(-1)!.id;
+    const deps = { mailer, client: harness.client, env: harness.deps.env };
+    const input = {
+      event: 'preview_ready' as const,
+      conversation: { number: pullRequest.number, title: 'Shorten the headline' },
+      commentId,
+      record: outcome.record,
+      recipients: harness.deps.env.allowedEmails,
+    };
+
+    const first = await notifyOnce(deps, input);
+    expect(first.sent).toBe(true);
+    expect(mailer.sent).toHaveLength(1);
+
+    // Re-read the record, exactly as a redelivered webhook would.
+    const reread = await readConversation(harness.client, pullRequest.number);
+    const second = await notifyOnce(deps, { ...input, record: reread!.records.at(-1)! });
+
+    expect(second).toEqual({ sent: false, reason: 'already_notified' });
+    expect(mailer.sent).toHaveLength(1);
+  });
+
+  it('names no file path, preview address, or git word in what the client reads', async () => {
+    harness = await createHarness({ script: editsTheHomepage('Built for speed') });
+    const pullRequest = await openConversation(harness.client, branchFor(1));
+    harness.netlify.addDeploy(previewDeploy(pullRequest.number));
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Change the homepage headline',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    const mailer = createFakeMailer();
+    const commentId = (await harness.client.listComments(pullRequest.number)).at(-1)!.id;
+    await notifyOnce(
+      { mailer, client: harness.client, env: harness.deps.env },
+      {
+        event: 'preview_ready',
+        conversation: { number: pullRequest.number, title: 'Shorten the headline' },
+        commentId,
+        record: outcome.record,
+        recipients: harness.deps.env.allowedEmails,
+      },
+    );
+
+    const sent = mailer.sent[0]!;
+    const body = `${sent.subject}\n${sent.text}`;
+    expect(body).not.toContain('src/index.html');
+    expect(body).not.toContain('netlify.app');
+    expect(body).not.toMatch(/\b(commit|branch|pull request|merge|diff)\b/i);
   });
 });

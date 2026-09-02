@@ -4,8 +4,10 @@ import {
   readConversation,
   renderClientMessage,
 } from '@/lib/conversations';
-import { getInstallation } from '@/lib/installation';
+import { getInstallation, type Installation } from '@/lib/installation';
 import { beginRequest, type BeginOutcome } from '@/lib/jobs/run';
+import { notifyOnce } from '@/lib/notify/email';
+import type { NotificationEvent, RequestRecord } from '@/types';
 
 /**
  * Starting a request is the same act whether it opens a conversation or
@@ -46,6 +48,8 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
       netlify: installation.netlify,
       bus: installation.bus,
       env: installation.env,
+      onFinished: (record, commentId) =>
+        notifyClients(installation, detail.conversation.title, input.conversationNumber, record, commentId),
       config: settings,
     },
     {
@@ -73,4 +77,48 @@ export async function startAndDetach(input: StartInput): Promise<BeginOutcome> {
     });
   }
   return begun;
+}
+
+/**
+ * Tells the client what happened, once.
+ *
+ * The record's own `notified` list is the delivery record (OD-004), so calling
+ * this twice for one event sends one email. A notification that cannot be sent
+ * is logged rather than raised: the request itself already succeeded or failed
+ * on its own terms, and failing it again over an email would be reporting the
+ * wrong outcome.
+ */
+async function notifyClients(
+  installation: Installation,
+  title: string,
+  conversationNumber: number,
+  record: RequestRecord,
+  commentId: number,
+): Promise<void> {
+  const event = notificationEventFor(record);
+  if (!event) return;
+
+  try {
+    await notifyOnce(
+      { mailer: installation.mailer, client: installation.client, env: installation.env },
+      {
+        event,
+        conversation: { number: conversationNumber, title },
+        commentId,
+        record,
+        recipients: installation.env.allowedEmails,
+        ...(record.previewUrl ? { previewUrl: record.previewUrl } : {}),
+      },
+    );
+  } catch (cause) {
+    console.error(`[webagent] could not notify about conversation ${conversationNumber}`, cause);
+  }
+}
+
+/** An abandoned request is not announced: nobody asked for the ending it got. */
+function notificationEventFor(record: RequestRecord): NotificationEvent | null {
+  if (record.outcome === 'succeeded') return 'preview_ready';
+  if (record.outcome === 'blocked') return 'request_blocked';
+  if (record.outcome === 'failed') return 'request_failed';
+  return null;
 }

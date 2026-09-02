@@ -32,13 +32,13 @@ image under `agent/`. Per plan.md Structure Decision.
 
 **Purpose**: Project skeleton and tooling.
 
-- [ ] T001 Initialize Next.js 15 App Router project with TypeScript 5 and Node 22 in repository root, App Router only, no `src/pages`
-- [ ] T002 Add dependencies to `package.json`: `octokit`, `dockerode`, `simple-git`, `zod`, `yaml`, `minimatch`, `nodemailer`, `otplib`, `argon2`
-- [ ] T003 [P] Configure Vitest with `vitest.config.ts` and separate `unit`, `int` projects mapped to `tests/unit` and `tests/integration`
-- [ ] T004 [P] Configure Playwright in `playwright.config.ts` pointing at `tests/e2e`
-- [ ] T005 [P] Configure ESLint and Prettier in `eslint.config.mjs` and `.prettierrc`
-- [ ] T006 [P] Create directory skeleton `src/lib/{config,auth,github,netlify,policy,lock,runner,mirror,record,jobs,notify}` each with an `index.ts` exporting nothing yet
-- [ ] T007 [P] Write `.env.example` with every variable from quickstart.md, with comments and no real values
+- [X] T001 Initialize Next.js 15 App Router project with TypeScript 5 and Node 22 in repository root, App Router only, no `src/pages`
+- [X] T002 Add dependencies to `package.json`: `octokit`, `dockerode`, `simple-git`, `zod`, `yaml`, `minimatch`, `nodemailer`, `otplib`, `argon2`
+- [X] T003 [P] Configure Vitest with `vitest.config.ts` and separate `unit`, `int` projects mapped to `tests/unit` and `tests/integration`
+- [X] T004 [P] Configure Playwright in `playwright.config.ts` pointing at `tests/e2e`
+- [X] T005 [P] Configure ESLint and Prettier in `eslint.config.mjs` and `.prettierrc`
+- [X] T006 [P] Create directory skeleton `src/lib/{config,auth,github,netlify,policy,lock,runner,mirror,record,jobs,notify}` each with an `index.ts` exporting nothing yet
+- [X] T007 [P] Write `.env.example` with every variable from quickstart.md, with comments and no real values
 
 ---
 
@@ -50,72 +50,72 @@ image under `agent/`. Per plan.md Structure Decision.
 
 ### Configuration
 
-- [ ] T008 [P] Write failing tests for the environment schema in `tests/unit/config/env.test.ts`: every required variable, rejection of malformed repository references, a non-empty `ALLOWED_EMAILS` list normalised to lower case, and a readable aggregated error naming each fault
-- [ ] T009 Implement the environment schema and loader in `src/lib/config/env.ts` using zod, failing fast at import time
-- [ ] T010 [P] Write failing tests for settings parsing in `tests/unit/config/settings.test.ts` covering valid input, unknown-field rejection, explicit rejection of an `allowedEmails` key with a message pointing to deployment configuration, and `maxRequestMinutes` bounds
-- [ ] T011 Implement `.webagent/config.yml` parsing and validation in `src/lib/config/settings.ts` per contracts/repo-files.md
-- [ ] T012 [P] Write failing tests in `tests/unit/config/cache.test.ts` proving that invalid settings leave the previously valid settings in force and surface a fault, never falling open
-- [ ] T013 Implement the settings cache with last-known-good retention in `src/lib/config/cache.ts` (FR-003f)
+- [X] T008 [P] Write failing tests for the environment schema in `tests/unit/config/env.test.ts`: every required variable, rejection of malformed repository references, a non-empty `ALLOWED_EMAILS` list normalised to lower case, and a readable aggregated error naming each fault
+- [X] T009 Implement the environment schema and loader in `src/lib/config/env.ts` using zod, failing fast at import time
+- [X] T010 [P] Write failing tests for settings parsing in `tests/unit/config/settings.test.ts` covering valid input, unknown-field rejection, explicit rejection of an `allowedEmails` key with a message pointing to deployment configuration, and `maxRequestMinutes` bounds
+- [X] T011 Implement `.webagent/config.yml` parsing and validation in `src/lib/config/settings.ts` per contracts/repo-files.md
+- [X] T012 [P] Write failing tests in `tests/unit/config/cache.test.ts` proving that invalid settings leave the previously valid settings in force and surface a fault, never falling open
+- [X] T013 Implement the settings cache with last-known-good retention in `src/lib/config/cache.ts` (FR-003f)
 
 ### Version control client
 
-- [ ] T014 [P] Write failing tests for installation token minting and caching in `tests/unit/github/auth.test.ts` with a clock stub, asserting refresh before expiry
-- [ ] T015 Implement GitHub App authentication in `src/lib/github/auth.ts`
-- [ ] T016 [P] Record HTTP fixtures for repository read, ref create and delete, branch push, pull request create, and comment create under `tests/fixtures/github/`
-- [ ] T017 Implement the repository client in `src/lib/github/client.ts`: read file, create ref, delete ref, get ref with committer date, push branch, create and update pull request, list and create comments, merge, revert
-- [ ] T018 [P] Write failing tests in `tests/unit/config/loader.test.ts` for reading `.webagent/config.yml`, `.webagent/policy.yml`, and `AGENTS.md` from the repository through the client
-- [ ] T019 Implement repository-backed configuration loading in `src/lib/config/loader.ts`
+- [X] T014 [P] Write failing tests for installation token minting and caching in `tests/unit/github/auth.test.ts` with a clock stub, asserting refresh before expiry
+- [X] T015 Implement GitHub App authentication in `src/lib/github/auth.ts`
+- [X] T016 [P] Record HTTP fixtures for repository read, ref create and delete, branch push, pull request create, and comment create under `tests/fixtures/github/`
+- [X] T017 Implement the repository client in `src/lib/github/client.ts`: read file, create ref, delete ref, get ref with committer date, push branch, create and update pull request, list and create comments, merge, revert
+- [X] T018 [P] Write failing tests in `tests/unit/config/loader.test.ts` for reading `.webagent/config.yml`, `.webagent/policy.yml`, and `AGENTS.md` from the repository through the client
+- [X] T019 Implement repository-backed configuration loading in `src/lib/config/loader.ts`
 
 ### The policy gate
 
-- [ ] T020 [P] Write failing tests for the gate in `tests/unit/policy/gate.test.ts`: unconditional denies win over site `allow`; a path matching no `allow` is denied; `maxFilesChanged` and `maxDiffLines`; `forbidNewDependencies`; and a violation naming the offending path
-- [ ] T021 [P] Write a failing test in `tests/unit/policy/gate.test.ts` asserting `.webagent/**` and `AGENTS.md` are denied even when a site policy explicitly allows them (FR-003e)
-- [ ] T022 Implement the gate as a pure function in `src/lib/policy/gate.ts` — no filesystem, no network — evaluating in the order given in contracts/repo-files.md
-- [ ] T023 [P] Write failing tests for policy parsing and defaults in `tests/unit/policy/parse.test.ts`, including an absent policy file yielding the documented defaults (FR-019)
-- [ ] T024 Implement policy parsing and defaulting in `src/lib/policy/parse.ts`
+- [X] T020 [P] Write failing tests for the gate in `tests/unit/policy/gate.test.ts`: unconditional denies win over site `allow`; a path matching no `allow` is denied; `maxFilesChanged` and `maxDiffLines`; `forbidNewDependencies`; and a violation naming the offending path
+- [X] T021 [P] Write a failing test in `tests/unit/policy/gate.test.ts` asserting `.webagent/**` and `AGENTS.md` are denied even when a site policy explicitly allows them (FR-003e)
+- [X] T022 Implement the gate as a pure function in `src/lib/policy/gate.ts` — no filesystem, no network — evaluating in the order given in contracts/repo-files.md
+- [X] T023 [P] Write failing tests for policy parsing and defaults in `tests/unit/policy/parse.test.ts`, including an absent policy file yielding the documented defaults (FR-019)
+- [X] T024 Implement policy parsing and defaulting in `src/lib/policy/parse.ts`
 
 ### The lock
 
-- [ ] T025 [P] Write failing tests in `tests/unit/lock/lock.test.ts`: acquisition succeeds once; a second acquisition observes rejection; release deletes the ref; a ref older than `maxRequestMinutes` is breakable; a fresh ref is not
-- [ ] T026 Implement `refs/webagent/lock` acquisition, release, and staleness handling in `src/lib/lock/lock.ts` (FR-007b, FR-007c)
+- [X] T025 [P] Write failing tests in `tests/unit/lock/lock.test.ts`: acquisition succeeds once; a second acquisition observes rejection; release deletes the ref; a ref older than `maxRequestMinutes` is breakable; a fresh ref is not
+- [X] T026 Implement `refs/webagent/lock` acquisition, release, and staleness handling in `src/lib/lock/lock.ts` (FR-007b, FR-007c)
 
 ### The durable record
 
-- [ ] T027 [P] Write failing tests in `tests/unit/record/record.test.ts`: render then parse yields the original; a comment with no marker parses as prose; an unparseable block degrades to prose rather than throwing
-- [ ] T028 Implement rendering and parsing of the `webagent:v1` block in `src/lib/record/record.ts` per contracts/durable-record.md
-- [ ] T029 [P] Write a property test in `tests/unit/record/roundtrip.test.ts` asserting render and parse are inverses across generated records
+- [X] T027 [P] Write failing tests in `tests/unit/record/record.test.ts`: render then parse yields the original; a comment with no marker parses as prose; an unparseable block degrades to prose rather than throwing
+- [X] T028 Implement rendering and parsing of the `webagent:v1` block in `src/lib/record/record.ts` per contracts/durable-record.md
+- [X] T029 [P] Write a property test in `tests/unit/record/roundtrip.test.ts` asserting render and parse are inverses across generated records
 
 ### Authentication
 
-- [ ] T030 [P] Write failing tests in `tests/unit/auth/magic-link.test.ts`: token signing and verification, expiry, single use within its window, and that an address absent from the configured `ALLOWED_EMAILS` produces no token
-- [ ] T031 Implement magic-link token issue and verification in `src/lib/auth/magic-link.ts`
-- [ ] T032 [P] Write failing tests in `tests/unit/auth/session.test.ts` for signed cookie issue, verification, tamper rejection, and expiry
-- [ ] T033 Implement the session cookie in `src/lib/auth/session.ts`
-- [ ] T034 [P] Write a failing test in `tests/unit/auth/authorize.test.ts` proving authorization is re-checked against the configured `ALLOWED_EMAILS` on every request, and a failing test proving an `allowedEmails` key in the repository settings grants nobody access (FR-003c1)
-- [ ] T035 Implement the single authorization choke point in `src/lib/auth/authorize.ts` (Principle VI)
+- [X] T030 [P] Write failing tests in `tests/unit/auth/magic-link.test.ts`: token signing and verification, expiry, single use within its window, and that an address absent from the configured `ALLOWED_EMAILS` produces no token
+- [X] T031 Implement magic-link token issue and verification in `src/lib/auth/magic-link.ts`
+- [X] T032 [P] Write failing tests in `tests/unit/auth/session.test.ts` for signed cookie issue, verification, tamper rejection, and expiry
+- [X] T033 Implement the session cookie in `src/lib/auth/session.ts`
+- [X] T034 [P] Write a failing test in `tests/unit/auth/authorize.test.ts` proving authorization is re-checked against the configured `ALLOWED_EMAILS` on every request, and a failing test proving an `allowedEmails` key in the repository settings grants nobody access (FR-003c1)
+- [X] T035 Implement the single authorization choke point in `src/lib/auth/authorize.ts` (Principle VI)
 
 ### Repository working copies
 
-- [ ] T036 [P] Write failing tests in `tests/unit/mirror/mirror.test.ts` against a local temporary repository: mirror creation, fetch update, working tree creation at a branch, and rebuild when the mirror is missing or corrupt
-- [ ] T037 Implement the bare mirror cache and per-job working tree in `src/lib/mirror/mirror.ts` (R8)
+- [X] T036 [P] Write failing tests in `tests/unit/mirror/mirror.test.ts` against a local temporary repository: mirror creation, fetch update, working tree creation at a branch, and rebuild when the mirror is missing or corrupt
+- [X] T037 Implement the bare mirror cache and per-job working tree in `src/lib/mirror/mirror.ts` (R8)
 
 ### Job execution
 
-- [ ] T038 [P] Write failing tests in `tests/unit/runner/contract.test.ts` against a fake runner covering `start`, `logs`, `cancel`, and timeout kill
-- [ ] T039 Define the `JobRunner` interface and a fake implementation in `src/lib/runner/index.ts` and `src/lib/runner/fake.ts`
-- [ ] T040 Implement the Docker runner in `src/lib/runner/docker.ts` using dockerode: mount the working tree at `/work` and the control directory at `/control`, pass only `OPENROUTER_API_KEY` and `MODEL`, stream stdout, enforce the timeout, always destroy the container
-- [ ] T041 [P] Write the agent image in `agent/Dockerfile` with node and opencode pinned to explicit versions — **no git**, since the container never commits
-- [ ] T042 Write `agent/entrypoint.sh`: read `/control/prompt.json`, run `opencode run --model "$MODEL" --format json --auto`, edit files under `/work` only, write `/control/result.json`, exit
-- [ ] T043 [P] Write a failing test in `tests/unit/runner/isolation.test.ts` asserting the container receives no GitHub or Netlify credential, that the working tree has no configured git remote, and that no control file is reachable from inside `/work` (FR-015)
-- [ ] T043a [P] Write a failing test in `tests/unit/mirror/changeset.test.ts` asserting the change set derived from the working tree includes untracked additions and deletions, not only tracked modifications
-- [ ] T043b Implement working-tree change-set derivation and controlled commit in `src/lib/mirror/changeset.ts`: gate first, then stage exactly the permitted paths and commit with an author and message the host controls
+- [X] T038 [P] Write failing tests in `tests/unit/runner/contract.test.ts` against a fake runner covering `start`, `logs`, `cancel`, and timeout kill
+- [X] T039 Define the `JobRunner` interface and a fake implementation in `src/lib/runner/index.ts` and `src/lib/runner/fake.ts`
+- [X] T040 Implement the Docker runner in `src/lib/runner/docker.ts` using dockerode: mount the working tree at `/work` and the control directory at `/control`, pass only `OPENROUTER_API_KEY` and `MODEL`, stream stdout, enforce the timeout, always destroy the container
+- [X] T041 [P] Write the agent image in `agent/Dockerfile` with node and opencode pinned to explicit versions — **no git**, since the container never commits
+- [X] T042 Write `agent/entrypoint.sh`: read `/control/prompt.json`, run `opencode run --model "$MODEL" --format json --auto`, edit files under `/work` only, write `/control/result.json`, exit
+- [X] T043 [P] Write a failing test in `tests/unit/runner/isolation.test.ts` asserting the container receives no GitHub or Netlify credential, that the working tree has no configured git remote, and that no control file is reachable from inside `/work` (FR-015)
+- [X] T043a [P] Write a failing test in `tests/unit/mirror/changeset.test.ts` asserting the change set derived from the working tree includes untracked additions and deletions, not only tracked modifications
+- [X] T043b Implement working-tree change-set derivation and controlled commit in `src/lib/mirror/changeset.ts`: gate first, then stage exactly the permitted paths and commit with an author and message the host controls
 
 ### Progress plumbing
 
-- [ ] T044 [P] Write failing tests in `tests/unit/jobs/bus.test.ts` for publish, subscribe, unsubscribe, and late-subscriber behaviour
-- [ ] T045 Implement the in-process event bus in `src/lib/jobs/bus.ts`
-- [ ] T046 [P] Write failing tests in `tests/unit/jobs/state.test.ts` for the stage machine: legal transitions, every terminal stage releasing the lock and writing a record, and rejection of illegal transitions
-- [ ] T047 Implement the stage machine in `src/lib/jobs/state.ts`
+- [X] T044 [P] Write failing tests in `tests/unit/jobs/bus.test.ts` for publish, subscribe, unsubscribe, and late-subscriber behaviour
+- [X] T045 Implement the in-process event bus in `src/lib/jobs/bus.ts`
+- [X] T046 [P] Write failing tests in `tests/unit/jobs/state.test.ts` for the stage machine: legal transitions, every terminal stage releasing the lock and writing a record, and rejection of illegal transitions
+- [X] T047 Implement the stage machine in `src/lib/jobs/state.ts`
 
 **Checkpoint**: Foundation ready. User stories may proceed.
 
@@ -131,29 +131,29 @@ conversation showing the requested change while the public site is unchanged.
 
 ### Tests
 
-- [ ] T048 [P] [US1] Write failing integration tests in `tests/integration/conversations.test.ts` for creating a conversation, posting a message, and receiving `409` when a request is already in flight (FR-007b)
-- [ ] T048a [P] [US1] Write a failing integration test in the same file asserting a follow-up message commits to the **same** branch and pull request, refreshing the existing preview rather than opening a competing one (FR-006, US1 acceptance 5)
-- [ ] T049 [P] [US1] Write failing integration tests in `tests/integration/stream.test.ts` asserting stage events are emitted in order and that reconnection replays durable records before resuming live output
-- [ ] T050 [P] [US1] Write failing integration tests in `tests/integration/netlify-webhook.test.ts` covering correlation by pull request number, fallback to commit reference, an uncorrelatable deploy being ignored, and repeated delivery of the same event being idempotent
+- [X] T048 [P] [US1] Write failing integration tests in `tests/integration/conversations.test.ts` for creating a conversation, posting a message, and receiving `409` when a request is already in flight (FR-007b)
+- [X] T048a [P] [US1] Write a failing integration test in the same file asserting a follow-up message commits to the **same** branch and pull request, refreshing the existing preview rather than opening a competing one (FR-006, US1 acceptance 5)
+- [X] T049 [P] [US1] Write failing integration tests in `tests/integration/stream.test.ts` asserting stage events are emitted in order and that reconnection replays durable records before resuming live output
+- [X] T050 [P] [US1] Write failing integration tests in `tests/integration/netlify-webhook.test.ts` covering correlation by pull request number, fallback to commit reference, an uncorrelatable deploy being ignored, and repeated delivery of the same event being idempotent
 
 ### Implementation
 
-- [ ] T051 [US1] Implement the Netlify client in `src/lib/netlify/client.ts`: fetch deploys for the site, find by pull request number and by commit reference
-- [ ] T052 [US1] Implement webhook payload parsing and signature verification in `src/lib/netlify/webhook.ts`, tolerating unknown fields (R4 assumption)
-- [ ] T053 [US1] Implement prompt assembly in `src/lib/jobs/prompt.ts`: current request, conversation history from records, `AGENTS.md` guidance, optional page hint
-- [ ] T054 [US1] Implement the orchestrator in `src/lib/jobs/run.ts`: acquire lock, build working tree, run container, derive the change set, gate it, stage and commit, push, open or update the pull request, await preview, write the record, release the lock — releasing on every path including failure. A blocked change is discarded by deleting the working tree; nothing was committed
-- [ ] T055 [US1] Implement `POST /api/conversations` in `src/app/api/conversations/route.ts` creating branch `webagent/c-<number>`, opening a pull request, and starting a request
-- [ ] T056 [US1] Implement `GET /api/conversations` in the same file, assembling the list from pull requests
-- [ ] T057 [US1] Implement `GET /api/conversations/[number]` in `src/app/api/conversations/[number]/route.ts`, assembling history by parsing comments (FR-009b)
-- [ ] T058 [US1] Implement `POST /api/conversations/[number]/messages` in `src/app/api/conversations/[number]/messages/route.ts`, returning `409` when a request is in flight
-- [ ] T059 [US1] Implement `GET /api/conversations/[number]/stream` in `src/app/api/conversations/[number]/stream/route.ts` as server-sent events on the Node runtime
-- [ ] T060 [US1] Implement `POST /api/webhooks/netlify` in `src/app/api/webhooks/netlify/route.ts`
-- [ ] T061 [P] [US1] Implement the magic-link routes in `src/app/api/auth/[...route]/route.ts`, returning `202` regardless of whether the address is permitted
-- [ ] T062 [P] [US1] Build the sign-in page in `src/app/login/page.tsx`
-- [ ] T063 [US1] Build the conversation list in `src/app/(client)/page.tsx`
-- [ ] T064 [US1] Build the conversation view in `src/app/(client)/c/[number]/page.tsx`: messages, live progress, and message entry disabled while a request runs with a stated reason (FR-007a)
-- [ ] T065 [P] [US1] Build the preview panel in `src/components/PreviewPane.tsx` with desktop and mobile width toggle (FR-022)
-- [ ] T066 [P] [US1] Implement email notification in `src/lib/notify/email.ts`, reading `notified` from the durable record before sending and appending to it after (OD-004)
+- [X] T051 [US1] Implement the Netlify client in `src/lib/netlify/client.ts`: fetch deploys for the site, find by pull request number and by commit reference
+- [X] T052 [US1] Implement webhook payload parsing and signature verification in `src/lib/netlify/webhook.ts`, tolerating unknown fields (R4 assumption)
+- [X] T053 [US1] Implement prompt assembly in `src/lib/jobs/prompt.ts`: current request, conversation history from records, `AGENTS.md` guidance, optional page hint
+- [X] T054 [US1] Implement the orchestrator in `src/lib/jobs/run.ts`: acquire lock, build working tree, run container, derive the change set, gate it, stage and commit, push, open or update the pull request, await preview, write the record, release the lock — releasing on every path including failure. A blocked change is discarded by deleting the working tree; nothing was committed
+- [X] T055 [US1] Implement `POST /api/conversations` in `src/app/api/conversations/route.ts` creating branch `webagent/c-<number>`, opening a pull request, and starting a request
+- [X] T056 [US1] Implement `GET /api/conversations` in the same file, assembling the list from pull requests
+- [X] T057 [US1] Implement `GET /api/conversations/[number]` in `src/app/api/conversations/[number]/route.ts`, assembling history by parsing comments (FR-009b)
+- [X] T058 [US1] Implement `POST /api/conversations/[number]/messages` in `src/app/api/conversations/[number]/messages/route.ts`, returning `409` when a request is in flight
+- [X] T059 [US1] Implement `GET /api/conversations/[number]/stream` in `src/app/api/conversations/[number]/stream/route.ts` as server-sent events on the Node runtime
+- [X] T060 [US1] Implement `POST /api/webhooks/netlify` in `src/app/api/webhooks/netlify/route.ts`
+- [X] T061 [P] [US1] Implement the magic-link routes in `src/app/api/auth/[...route]/route.ts`, returning `202` regardless of whether the address is permitted
+- [X] T062 [P] [US1] Build the sign-in page in `src/app/login/page.tsx`
+- [X] T063 [US1] Build the conversation list in `src/app/(client)/page.tsx`
+- [X] T064 [US1] Build the conversation view in `src/app/(client)/c/[number]/page.tsx`: messages, live progress, and message entry disabled while a request runs with a stated reason (FR-007a)
+- [X] T065 [P] [US1] Build the preview panel in `src/components/PreviewPane.tsx` with desktop and mobile width toggle (FR-022)
+- [X] T066 [P] [US1] Implement email notification in `src/lib/notify/email.ts`, reading `notified` from the durable record before sending and appending to it after (OD-004)
 
 **Checkpoint**: US1 is independently deliverable. A client can commission changes and see them; publishing is manual.
 
