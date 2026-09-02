@@ -16,7 +16,7 @@ import type { Mirror, WorkingTree } from '@/lib/mirror/types';
 import type { NetlifyClient } from '@/lib/netlify';
 import { gate } from '@/lib/policy/gate';
 import { renderRecord } from '@/lib/record/record';
-import { writeControlDir, readAgentResult } from '@/lib/runner/control';
+import { writeControlDir } from '@/lib/runner/control';
 import type { JobRunner } from '@/lib/runner/types';
 import type {
   AgentPrompt,
@@ -258,7 +258,9 @@ async function runAgent(deps: RunDeps, requestId: string, prepared: Prepared): P
     onOutput: (text) => deps.bus.publish({ type: 'output', requestId, text }),
   });
 
-  const result = await readAgentResult(prepared.controlDir);
+  // The runner already read `/control/result.json` and hands it back; reading
+  // the file again here would be a second, divergent source of the same fact.
+  const result = run.result;
   const cost = {
     tokensIn: result?.tokensIn ?? 0,
     tokensOut: result?.tokensOut ?? 0,
