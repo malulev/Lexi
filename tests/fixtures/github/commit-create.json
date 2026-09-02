@@ -1,0 +1,29 @@
+{
+  "status": 201,
+  "body": {
+    "sha": "9999999999999999999999999999999999feed",
+    "node_id": "MDY6Q29tbWl0OTk5OTk5OTk5OTk5OTk5OTk5OTk5OWZlZWQ=",
+    "url": "https://api.github.com/repos/acme/site/git/commits/9999999999999999999999999999999999feed",
+    "message": "webagent: anchor commit",
+    "tree": {
+      "sha": "5555555555555555555555555555555555dead",
+      "url": "https://api.github.com/repos/acme/site/git/trees/5555555555555555555555555555555555dead"
+    },
+    "author": {
+      "name": "webagent",
+      "email": "webagent@client.example",
+      "date": "2026-09-02T10:00:00Z"
+    },
+    "committer": {
+      "name": "webagent",
+      "email": "webagent@client.example",
+      "date": "2026-09-02T10:00:00Z"
+    },
+    "parents": [
+      {
+        "sha": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+        "url": "https://api.github.com/repos/acme/site/git/commits/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+    ]
+  }
+}

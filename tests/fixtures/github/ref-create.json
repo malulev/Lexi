@@ -1,0 +1,13 @@
+{
+  "status": 201,
+  "body": {
+    "ref": "refs/webagent/lock",
+    "node_id": "MDM6UmVmcmVmcy93ZWJhZ2VudC9sb2Nr",
+    "url": "https://api.github.com/repos/acme/site/git/refs/webagent/lock",
+    "object": {
+      "type": "commit",
+      "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd",
+      "url": "https://api.github.com/repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd"
+    }
+  }
+}

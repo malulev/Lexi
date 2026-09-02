@@ -1,0 +1,29 @@
+{
+  "status": 200,
+  "body": {
+    "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd",
+    "node_id": "MDY6Q29tbWl0YWEyMThmNTZiMTRjOTY1Mzg5MWY5ZTc0MjY0YTM4M2ZhNDNmZWZiZA==",
+    "url": "https://api.github.com/repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd",
+    "message": "webagent lock: request req_123 started 2026-09-02T10:00:00Z",
+    "tree": {
+      "sha": "691272480426f78a0138979dd3ce63b77f706feb",
+      "url": "https://api.github.com/repos/acme/site/git/trees/691272480426f78a0138979dd3ce63b77f706feb"
+    },
+    "author": {
+      "name": "webagent",
+      "email": "webagent@client.example",
+      "date": "2026-09-02T10:00:00Z"
+    },
+    "committer": {
+      "name": "webagent",
+      "email": "webagent@client.example",
+      "date": "2026-09-02T10:00:00Z"
+    },
+    "parents": [
+      {
+        "sha": "b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405",
+        "url": "https://api.github.com/repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405"
+      }
+    ]
+  }
+}

@@ -106,7 +106,7 @@ function subscribeLive(
   if (!requestId) return () => {};
 
   for (const event of installation.bus.history(requestId)) forward(event, send);
-  return installation.bus.subscribe(requestId, (event) => forward(event, send));
+  return installation.bus.subscribe(requestId, (event: JobEvent) => forward(event, send));
 }
 
 function forward(event: JobEvent, send: Send): void {

@@ -1,0 +1,13 @@
+{
+  "id": "deploy-other-repo",
+  "site_id": "site_fixture",
+  "build_id": "build-other-repo",
+  "state": "ready",
+  "name": "client-site",
+  "deploy_url": "https://main--client-site.netlify.app",
+  "branch": "some-unrelated-branch",
+  "commit_ref": "fffffff6666666666666666666666666666666",
+  "context": "branch-deploy",
+  "created_at": "2026-09-01T14:00:00.000Z",
+  "updated_at": "2026-09-01T14:01:00.000Z"
+}

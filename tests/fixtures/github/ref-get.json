@@ -1,0 +1,13 @@
+{
+  "status": 200,
+  "body": {
+    "ref": "refs/heads/webagent/c-1",
+    "node_id": "MDM6UmVmcmVmcy9oZWFkcy93ZWJhZ2VudC9jLTE=",
+    "url": "https://api.github.com/repos/acme/site/git/refs/heads/webagent/c-1",
+    "object": {
+      "type": "commit",
+      "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd",
+      "url": "https://api.github.com/repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd"
+    }
+  }
+}

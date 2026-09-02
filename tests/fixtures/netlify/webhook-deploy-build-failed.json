@@ -1,0 +1,14 @@
+{
+  "id": "deploy-42-c",
+  "site_id": "site_fixture",
+  "build_id": "build-42-c",
+  "state": "error",
+  "name": "client-site",
+  "error_message": "Build script returned non-zero exit code: 2",
+  "review_id": 42,
+  "branch": "webagent/c-42",
+  "commit_ref": "ccccccc7777777777777777777777777777777",
+  "context": "deploy-preview",
+  "created_at": "2026-09-01T15:00:00.000Z",
+  "updated_at": "2026-09-01T15:01:00.000Z"
+}

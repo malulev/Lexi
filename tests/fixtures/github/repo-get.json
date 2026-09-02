@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "id": 1296269,
+    "name": "site",
+    "full_name": "acme/site",
+    "default_branch": "main",
+    "private": true
+  }
+}

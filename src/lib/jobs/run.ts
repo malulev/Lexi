@@ -120,7 +120,17 @@ async function execute(
 ): Promise<RunOutcome> {
   const now = deps.now ?? (() => new Date());
   const startedAt = now().toISOString();
-  const machine = createStageMachine(requestId, { bus: deps.bus, now });
+  // The machine will not let a request reach a terminal stage without this
+  // firing, which is how "every ending releases the lock and writes a record"
+  // becomes a structural guarantee rather than a convention this file follows.
+  let reachedTerminal = false;
+  const machine = createStageMachine(requestId, {
+    bus: deps.bus,
+    now,
+    onTerminal: () => {
+      reachedTerminal = true;
+    },
+  });
 
   let tree: WorkingTree | null = null;
   let controlDir: string | null = null;
@@ -175,6 +185,14 @@ async function execute(
   } finally {
     await discard(tree, controlDir);
     await handle.release();
+
+    if (!reachedTerminal) {
+      // Unreachable by design: every return path above passes through `finish`,
+      // which advances to a terminal stage. Saying so out loud costs nothing and
+      // turns a silent lock leak into a line in the log if it ever stops being
+      // true.
+      console.error(`[webagent] request ${requestId} ended without a terminal stage`);
+    }
   }
 }
 
@@ -205,7 +223,10 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
     ...(input.targetHint ? { targetHint: input.targetHint } : {}),
     ...(input.buildFailureDetail ? { buildFailureDetail: input.buildFailureDetail } : {}),
   });
-  await writeControlDir(controlDir, prompt);
+  // Passing the working tree here is not redundant: it is what lets the control
+  // writer refuse a control directory nested inside the tree, rather than
+  // trusting this caller to have chosen one outside it (FR-015).
+  await writeControlDir(controlDir, tree.dir, prompt);
 
   return { tree, controlDir, prompt };
 }

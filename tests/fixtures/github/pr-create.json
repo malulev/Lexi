@@ -1,0 +1,13 @@
+{
+  "status": 201,
+  "body": {
+    "number": 1,
+    "title": "Add a spring sale banner",
+    "body": "Requested via the client dashboard.",
+    "state": "open",
+    "merged": false,
+    "updated_at": "2026-09-02T10:05:00Z",
+    "head": { "ref": "webagent/c-1", "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd" },
+    "base": { "ref": "main", "sha": "b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405" }
+  }
+}

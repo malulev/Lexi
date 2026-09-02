@@ -1,0 +1,10 @@
+{
+  "id": "site_fixture",
+  "name": "client-site",
+  "url": "https://client-site.example",
+  "ssl_url": "https://client-site.example",
+  "admin_url": "https://app.netlify.com/sites/client-site",
+  "custom_domain": "client-site.example",
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "updated_at": "2026-09-01T00:00:00.000Z"
+}

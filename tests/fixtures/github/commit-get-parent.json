@@ -1,0 +1,24 @@
+{
+  "status": 200,
+  "body": {
+    "sha": "b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405",
+    "node_id": "MDY6Q29tbWl0YjBiMWIyYjNiNGI1YjZiN2I4YjliYWJjYmRiZWJmMDEwMjAzMDQwNQ==",
+    "url": "https://api.github.com/repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405",
+    "message": "Update the homepage hero copy",
+    "tree": {
+      "sha": "5555555555555555555555555555555555dead",
+      "url": "https://api.github.com/repos/acme/site/git/trees/5555555555555555555555555555555555dead"
+    },
+    "author": {
+      "name": "jane",
+      "email": "jane@client.example",
+      "date": "2026-09-01T09:00:00Z"
+    },
+    "committer": {
+      "name": "jane",
+      "email": "jane@client.example",
+      "date": "2026-09-01T09:00:00Z"
+    },
+    "parents": []
+  }
+}

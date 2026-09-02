@@ -1,0 +1,26 @@
+{
+  "status": 200,
+  "body": [
+    {
+      "number": 2,
+      "title": "Update the pricing copy",
+      "body": "",
+      "state": "open",
+      "merged": false,
+      "updated_at": "2026-09-02T11:00:00Z",
+      "head": { "ref": "webagent/c-2", "sha": "d1d2d3d4d5d6d7d8d9dad1d2d3d4d5d6d7d8d9da" },
+      "base": { "ref": "main", "sha": "b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405" }
+    },
+    {
+      "number": 1,
+      "title": "Add a spring sale banner",
+      "body": "Requested via the client dashboard.",
+      "state": "closed",
+      "merged": true,
+      "merge_commit_sha": "e1e2e3e4e5e6e7e8e9eae1e2e3e4e5e6e7e8e9ea",
+      "updated_at": "2026-09-02T10:30:00Z",
+      "head": { "ref": "webagent/c-1", "sha": "aa218f56b14c9653891f9e74264a383fa43fefbd" },
+      "base": { "ref": "main", "sha": "b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405" }
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "status": 404,
+  "body": {
+    "message": "Not Found",
+    "documentation_url": "https://docs.github.com/rest/git/refs#get-a-reference"
+  }
+}

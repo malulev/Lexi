@@ -1,0 +1,13 @@
+{
+  "id": "deploy-17-branch",
+  "site_id": "site_fixture",
+  "build_id": "build-17-branch",
+  "state": "ready",
+  "name": "client-site",
+  "deploy_url": "https://webagent-c-17--client-site.netlify.app",
+  "branch": "webagent/c-17",
+  "commit_ref": "eeeeeee5555555555555555555555555555555",
+  "context": "branch-deploy",
+  "created_at": "2026-09-01T13:00:00.000Z",
+  "updated_at": "2026-09-01T13:01:00.000Z"
+}

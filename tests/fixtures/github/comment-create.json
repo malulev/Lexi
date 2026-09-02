@@ -1,0 +1,9 @@
+{
+  "status": 201,
+  "body": {
+    "id": 5001,
+    "body": "Preview ready: https://deploy-preview-1--client-site.netlify.app",
+    "created_at": "2026-09-02T10:06:00Z",
+    "user": { "login": "webagent-bot" }
+  }
+}

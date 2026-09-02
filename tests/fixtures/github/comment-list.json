@@ -1,0 +1,17 @@
+{
+  "status": 200,
+  "body": [
+    {
+      "id": 5000,
+      "body": "Add a spring sale banner to the homepage.",
+      "created_at": "2026-09-02T10:00:30Z",
+      "user": { "login": "jane" }
+    },
+    {
+      "id": 5001,
+      "body": "Preview ready: https://deploy-preview-1--client-site.netlify.app",
+      "created_at": "2026-09-02T10:06:00Z",
+      "user": { "login": "webagent-bot" }
+    }
+  ]
+}
