@@ -21,9 +21,10 @@ interface StageWireEvent {
   at: string;
 }
 
-interface OutputWireEvent {
-  text: string;
-}
+// An `output` event carries a `text` field, which is deliberately never read:
+// the contract's own example of it is a file path, and Principle I bans those
+// from every client surface. Only the event's arrival is used, as a liveness
+// pulse, so there is no wire type for its payload.
 
 interface DoneWireEvent {
   outcome: Outcome;
