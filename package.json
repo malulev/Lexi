@@ -1,0 +1,52 @@
+{
+  "name": "website-ai-auto-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --project unit",
+    "test:int": "vitest run --project int",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "argon2": "^0.45.1",
+    "dockerode": "^4.0.9",
+    "minimatch": "^10.2.6",
+    "next": "^15.5.25",
+    "nodemailer": "^7.0.9",
+    "octokit": "^5.0.5",
+    "otplib": "^13.5.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "simple-git": "^3.36.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/dockerode": "^4.0.1",
+    "@types/node": "^22.20.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "@eslint/js": "^9.39.5",
+    "typescript-eslint": "^8.69.0",
+    "eslint-plugin-react-hooks": "^7.1.1"
+  }
+}
