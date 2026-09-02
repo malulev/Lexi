@@ -1,0 +1,32 @@
+import { simpleGit } from 'simple-git';
+import type { WorkingTree } from '@/lib/mirror/types';
+
+/**
+ * Pushing is a host capability, deliberately not a property of the working tree.
+ *
+ * The tree the agent worked in has no remote (R2, FR-015), which is what makes
+ * pushing impossible from inside the container rather than merely forbidden.
+ * That guarantee only holds if the remote is never added to the tree — so the
+ * credential is supplied to a single push invocation and never written to the
+ * tree's configuration, where it would survive the request that needed it.
+ */
+export async function pushBranch(
+  tree: WorkingTree,
+  branch: string,
+  remoteUrl: string,
+): Promise<void> {
+  const git = simpleGit(tree.dir);
+
+  try {
+    await git.raw(['push', remoteUrl, `HEAD:refs/heads/${branch}`]);
+  } catch (cause) {
+    // The URL carries an access token. A raw git error message quotes the
+    // remote it failed against, so it can never be forwarded unredacted.
+    throw new Error(`could not push ${branch}: ${redactRemote(cause, remoteUrl)}`);
+  }
+}
+
+function redactRemote(cause: unknown, remoteUrl: string): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return message.split(remoteUrl).join('<remote>').replace(/x-access-token:[^@\s]+/g, '<redacted>');
+}
