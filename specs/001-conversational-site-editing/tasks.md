@@ -1,0 +1,299 @@
+---
+
+description: "Task list for conversational site editing"
+---
+
+# Tasks: Conversational Site Editing with Preview and One-Click Deploy
+
+**Input**: Design documents from `/specs/001-conversational-site-editing/`
+
+**Prerequisites**: plan.md, spec.md, research.md, data-model.md, contracts/, quickstart.md
+
+**Tests**: Included and non-optional. Constitution Principle IV makes test-first mandatory; the
+policy gate, the lock, the state machine, and the authorization path each require a failing test
+before implementation.
+
+**Organization**: Grouped by user story so each is independently implementable and testable.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: Can run in parallel — different files, no dependency on incomplete work
+- **[Story]**: US1–US5, matching spec.md user stories
+- File paths are exact
+
+## Path Conventions
+
+Single Next.js application at repository root: `src/app/`, `src/lib/`, `tests/`, plus the agent
+image under `agent/`. Per plan.md Structure Decision.
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: Project skeleton and tooling.
+
+- [ ] T001 Initialize Next.js 15 App Router project with TypeScript 5 and Node 22 in repository root, App Router only, no `src/pages`
+- [ ] T002 Add dependencies to `package.json`: `octokit`, `dockerode`, `simple-git`, `zod`, `yaml`, `minimatch`, `nodemailer`, `otplib`, `argon2`
+- [ ] T003 [P] Configure Vitest with `vitest.config.ts` and separate `unit`, `int` projects mapped to `tests/unit` and `tests/integration`
+- [ ] T004 [P] Configure Playwright in `playwright.config.ts` pointing at `tests/e2e`
+- [ ] T005 [P] Configure ESLint and Prettier in `eslint.config.mjs` and `.prettierrc`
+- [ ] T006 [P] Create directory skeleton `src/lib/{config,auth,github,netlify,policy,lock,runner,mirror,record,jobs,notify}` each with an `index.ts` exporting nothing yet
+- [ ] T007 [P] Write `.env.example` with every variable from quickstart.md, with comments and no real values
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: Everything every user story needs. No user story can start until this completes.
+
+**⚠️ Nothing in Phase 3 onward is startable until Phase 2 is done.**
+
+### Configuration
+
+- [ ] T008 [P] Write failing tests for the environment schema in `tests/unit/config/env.test.ts`: every required variable, rejection of malformed repository references, and a readable aggregated error naming each fault
+- [ ] T009 Implement the environment schema and loader in `src/lib/config/env.ts` using zod, failing fast at import time
+- [ ] T010 [P] Write failing tests for settings parsing in `tests/unit/config/settings.test.ts` covering valid input, unknown-field rejection, empty `allowedEmails` rejection, and `maxRequestMinutes` bounds
+- [ ] T011 Implement `.webagent/config.yml` parsing and validation in `src/lib/config/settings.ts` per contracts/repo-files.md
+- [ ] T012 [P] Write failing tests in `tests/unit/config/cache.test.ts` proving that invalid settings leave the previously valid settings in force and surface a fault, never falling open
+- [ ] T013 Implement the settings cache with last-known-good retention in `src/lib/config/cache.ts` (FR-003f)
+
+### Version control client
+
+- [ ] T014 [P] Write failing tests for installation token minting and caching in `tests/unit/github/auth.test.ts` with a clock stub, asserting refresh before expiry
+- [ ] T015 Implement GitHub App authentication in `src/lib/github/auth.ts`
+- [ ] T016 [P] Record HTTP fixtures for repository read, ref create and delete, branch push, pull request create, and comment create under `tests/fixtures/github/`
+- [ ] T017 Implement the repository client in `src/lib/github/client.ts`: read file, create ref, delete ref, get ref with committer date, push branch, create and update pull request, list and create comments, merge, revert
+- [ ] T018 [P] Write failing tests in `tests/unit/config/loader.test.ts` for reading `.webagent/config.yml`, `.webagent/policy.yml`, and `AGENTS.md` from the repository through the client
+- [ ] T019 Implement repository-backed configuration loading in `src/lib/config/loader.ts`
+
+### The policy gate
+
+- [ ] T020 [P] Write failing tests for the gate in `tests/unit/policy/gate.test.ts`: unconditional denies win over site `allow`; a path matching no `allow` is denied; `maxFilesChanged` and `maxDiffLines`; `forbidNewDependencies`; and a violation naming the offending path
+- [ ] T021 [P] Write a failing test in `tests/unit/policy/gate.test.ts` asserting `.webagent/**` and `AGENTS.md` are denied even when a site policy explicitly allows them (FR-003e)
+- [ ] T022 Implement the gate as a pure function in `src/lib/policy/gate.ts` — no filesystem, no network — evaluating in the order given in contracts/repo-files.md
+- [ ] T023 [P] Write failing tests for policy parsing and defaults in `tests/unit/policy/parse.test.ts`, including an absent policy file yielding the documented defaults (FR-019)
+- [ ] T024 Implement policy parsing and defaulting in `src/lib/policy/parse.ts`
+
+### The lock
+
+- [ ] T025 [P] Write failing tests in `tests/unit/lock/lock.test.ts`: acquisition succeeds once; a second acquisition observes rejection; release deletes the ref; a ref older than `maxRequestMinutes` is breakable; a fresh ref is not
+- [ ] T026 Implement `refs/webagent/lock` acquisition, release, and staleness handling in `src/lib/lock/lock.ts` (FR-007b, FR-007c)
+
+### The durable record
+
+- [ ] T027 [P] Write failing tests in `tests/unit/record/record.test.ts`: render then parse yields the original; a comment with no marker parses as prose; an unparseable block degrades to prose rather than throwing
+- [ ] T028 Implement rendering and parsing of the `webagent:v1` block in `src/lib/record/record.ts` per contracts/durable-record.md
+- [ ] T029 [P] Write a property test in `tests/unit/record/roundtrip.test.ts` asserting render and parse are inverses across generated records
+
+### Authentication
+
+- [ ] T030 [P] Write failing tests in `tests/unit/auth/magic-link.test.ts`: token signing and verification, expiry, single use within its window, and that an address absent from `allowedEmails` produces no token
+- [ ] T031 Implement magic-link token issue and verification in `src/lib/auth/magic-link.ts`
+- [ ] T032 [P] Write failing tests in `tests/unit/auth/session.test.ts` for signed cookie issue, verification, tamper rejection, and expiry
+- [ ] T033 Implement the session cookie in `src/lib/auth/session.ts`
+- [ ] T034 [P] Write a failing test in `tests/unit/auth/authorize.test.ts` proving authorization is re-checked against current `allowedEmails` on every request, so removing an address takes effect immediately
+- [ ] T035 Implement the single authorization choke point in `src/lib/auth/authorize.ts` (Principle VI)
+
+### Repository working copies
+
+- [ ] T036 [P] Write failing tests in `tests/unit/mirror/mirror.test.ts` against a local temporary repository: mirror creation, fetch update, working tree creation at a branch, and rebuild when the mirror is missing or corrupt
+- [ ] T037 Implement the bare mirror cache and per-job working tree in `src/lib/mirror/mirror.ts` (R8)
+
+### Job execution
+
+- [ ] T038 [P] Write failing tests in `tests/unit/runner/contract.test.ts` against a fake runner covering `start`, `logs`, `cancel`, and timeout kill
+- [ ] T039 Define the `JobRunner` interface and a fake implementation in `src/lib/runner/index.ts` and `src/lib/runner/fake.ts`
+- [ ] T040 Implement the Docker runner in `src/lib/runner/docker.ts` using dockerode: mount the working tree, pass only `OPENROUTER_API_KEY` and `MODEL`, stream stdout, enforce the timeout, always destroy the container
+- [ ] T041 [P] Write the agent image in `agent/Dockerfile` with node, git, and opencode pinned to explicit versions
+- [ ] T042 Write `agent/entrypoint.sh`: read `/work/.webagent-prompt.json`, run `opencode run --model "$MODEL" --format json --auto`, commit locally, write `/work/.webagent-result.json`, exit
+- [ ] T043 [P] Write a failing test in `tests/unit/runner/isolation.test.ts` asserting the container receives no GitHub or Netlify credential and that the working tree has no configured git remote (FR-015)
+
+### Progress plumbing
+
+- [ ] T044 [P] Write failing tests in `tests/unit/jobs/bus.test.ts` for publish, subscribe, unsubscribe, and late-subscriber behaviour
+- [ ] T045 Implement the in-process event bus in `src/lib/jobs/bus.ts`
+- [ ] T046 [P] Write failing tests in `tests/unit/jobs/state.test.ts` for the stage machine: legal transitions, every terminal stage releasing the lock and writing a record, and rejection of illegal transitions
+- [ ] T047 Implement the stage machine in `src/lib/jobs/state.ts`
+
+**Checkpoint**: Foundation ready. User stories may proceed.
+
+---
+
+## Phase 3: User Story 1 — Request a change and see it in a preview (Priority: P1) 🎯 MVP
+
+**Goal**: A client sends a plain-language request and receives a working preview link, with the
+public site untouched.
+
+**Independent test**: Sign in, send one change request, confirm a preview URL appears in the
+conversation showing the requested change while the public site is unchanged.
+
+### Tests
+
+- [ ] T048 [P] [US1] Write failing integration tests in `tests/integration/conversations.test.ts` for creating a conversation, posting a message, and receiving `409` when a request is already in flight (FR-007b)
+- [ ] T049 [P] [US1] Write failing integration tests in `tests/integration/stream.test.ts` asserting stage events are emitted in order and that reconnection replays durable records before resuming live output
+- [ ] T050 [P] [US1] Write failing integration tests in `tests/integration/netlify-webhook.test.ts` covering correlation by pull request number, fallback to commit reference, an uncorrelatable deploy being ignored, and repeated delivery of the same event being idempotent
+
+### Implementation
+
+- [ ] T051 [US1] Implement the Netlify client in `src/lib/netlify/client.ts`: fetch deploys for the site, find by pull request number and by commit reference
+- [ ] T052 [US1] Implement webhook payload parsing and signature verification in `src/lib/netlify/webhook.ts`, tolerating unknown fields (R4 assumption)
+- [ ] T053 [US1] Implement prompt assembly in `src/lib/jobs/prompt.ts`: current request, conversation history from records, `AGENTS.md` guidance, optional page hint
+- [ ] T054 [US1] Implement the orchestrator in `src/lib/jobs/run.ts`: acquire lock, build working tree, run container, gate the diff, push, open or update the pull request, await preview, write the record, release the lock — releasing on every path including failure
+- [ ] T055 [US1] Implement `POST /api/conversations` in `src/app/api/conversations/route.ts` creating branch `webagent/c-<number>`, opening a pull request, and starting a request
+- [ ] T056 [US1] Implement `GET /api/conversations` in the same file, assembling the list from pull requests
+- [ ] T057 [US1] Implement `GET /api/conversations/[number]` in `src/app/api/conversations/[number]/route.ts`, assembling history by parsing comments (FR-009b)
+- [ ] T058 [US1] Implement `POST /api/conversations/[number]/messages` in `src/app/api/conversations/[number]/messages/route.ts`, returning `409` when a request is in flight
+- [ ] T059 [US1] Implement `GET /api/conversations/[number]/stream` in `src/app/api/conversations/[number]/stream/route.ts` as server-sent events on the Node runtime
+- [ ] T060 [US1] Implement `POST /api/webhooks/netlify` in `src/app/api/webhooks/netlify/route.ts`
+- [ ] T061 [P] [US1] Implement the magic-link routes in `src/app/api/auth/[...route]/route.ts`, returning `202` regardless of whether the address is permitted
+- [ ] T062 [P] [US1] Build the sign-in page in `src/app/login/page.tsx`
+- [ ] T063 [US1] Build the conversation list in `src/app/(client)/page.tsx`
+- [ ] T064 [US1] Build the conversation view in `src/app/(client)/c/[number]/page.tsx`: messages, live progress, and message entry disabled while a request runs with a stated reason (FR-007a)
+- [ ] T065 [P] [US1] Build the preview panel in `src/components/PreviewPane.tsx` with desktop and mobile width toggle (FR-022)
+- [ ] T066 [P] [US1] Implement email notification in `src/lib/notify/email.ts`, reading `notified` from the durable record before sending and appending to it after (OD-004)
+
+**Checkpoint**: US1 is independently deliverable. A client can commission changes and see them; publishing is manual.
+
+---
+
+## Phase 4: User Story 3 — Developer-declared limits (Priority: P2)
+
+**Goal**: The gate honours site-declared policy and explains blocks in plain language.
+
+**Independent test**: Add a limit to a test repository, send a violating request, confirm nothing
+is written to the repository and the client sees a clear blocked message.
+
+**Note**: Sequenced before US2 because publishing without enforced limits is the unsafe ordering.
+
+### Tests
+
+- [ ] T067 [P] [US3] Write a failing integration test in `tests/integration/policy-block.test.ts` asserting a violating run pushes no branch and creates no commit, and that the record carries `blocked` with the offending path
+- [ ] T068 [P] [US3] Write a failing integration test in the same file asserting a request to modify `.webagent/policy.yml` is refused even when the site policy allows that path
+
+### Implementation
+
+- [ ] T069 [US3] Wire site-declared policy loading into the orchestrator in `src/lib/jobs/run.ts`, discarding the working tree on violation
+- [ ] T070 [US3] Implement blocked-outcome rendering in `src/lib/record/record.ts` carrying `violation` and `blockedPath`
+- [ ] T071 [US3] Map violations to client-facing language in `src/lib/jobs/messages.ts` per the error vocabulary in contracts/http-api.md
+- [ ] T072 [P] [US3] Inject `AGENTS.md` guidance into the prompt in `src/lib/jobs/prompt.ts` (FR-020)
+
+**Checkpoint**: The gate is load-bearing and demonstrated.
+
+---
+
+## Phase 5: User Story 2 — Approve, publish, undo (Priority: P2)
+
+**Goal**: A client publishes a previewed change and can reverse it.
+
+**Independent test**: Approve a ready preview, confirm the public site shows the change; press
+undo, confirm the public site returns to its prior content.
+
+### Tests
+
+- [ ] T073 [P] [US2] Write failing integration tests in `tests/integration/approve.test.ts`: approval merges; approval is refused with `409` when no successful preview exists; approval is refused when the branch is out of date (FR-030)
+- [ ] T074 [P] [US2] Write a failing integration test in `tests/integration/undo.test.ts` asserting undo creates a revert on the default branch, not merely a hosting rollback
+
+### Implementation
+
+- [ ] T075 [US2] Implement staleness detection against the default branch in `src/lib/github/staleness.ts`
+- [ ] T076 [US2] Implement `POST /api/conversations/[number]/approve` in `src/app/api/conversations/[number]/approve/route.ts`
+- [ ] T077 [US2] Implement `POST /api/conversations/[number]/undo` in `src/app/api/conversations/[number]/undo/route.ts`
+- [ ] T078 [US2] Add approval and undo controls to `src/app/(client)/c/[number]/page.tsx`, offering approval only with a successful preview and hiding it once published (FR-027)
+- [ ] T079 [P] [US2] Add publish-complete and undo-complete notifications in `src/lib/notify/email.ts`
+
+**Checkpoint**: The full loop is client-operable.
+
+---
+
+## Phase 6: User Story 4 — Installation and configuration (Priority: P3)
+
+**Goal**: A developer installs an instance for one client site, repeatably.
+
+**Independent test**: Follow the instructions from nothing to a running instance connected to a
+test site, sign in as the configured client, and complete a change request.
+
+### Tests
+
+- [ ] T080 [P] [US4] Write failing tests in `tests/integration/startup.test.ts` asserting startup fails with a specific, actionable message for each of: unreachable repository, missing installation, and unreachable hosting site (FR-003b)
+- [ ] T081 [P] [US4] Write failing tests in `tests/unit/auth/config-credential.test.ts` for password verification and time-based code verification, including rejection of a valid password with a wrong code
+
+### Implementation
+
+- [ ] T082 [US4] Implement startup validation in `src/lib/config/startup.ts`, refusing to serve on any invalid setting
+- [ ] T083 [US4] Implement the configuration credential in `src/lib/auth/config-credential.ts` using argon2 and otplib (FR-003a, R6)
+- [ ] T084 [US4] Build the configuration surface in `src/app/(config)/settings/page.tsx`, read-only over repository settings, showing effective policy and any settings fault
+- [ ] T085 [P] [US4] Write `docker-compose.yml` with the application, the Docker socket mount, and a note recording the socket's root-equivalence and the hardening path
+- [ ] T086 [P] [US4] Write `README.md` installation instructions matching quickstart.md, including the Deploy Previews prerequisite and the Netlify webhook setup
+
+---
+
+## Phase 7: User Story 5 — Failures stay in the conversation (Priority: P3)
+
+**Goal**: Every failure class reads as a plain-language message, and the conversation stays usable.
+
+**Independent test**: Force an agent timeout, a failing preview build, and an unreachable host;
+confirm three distinct plain-language messages and a still-usable conversation.
+
+### Tests
+
+- [ ] T087 [P] [US5] Write failing integration tests in `tests/integration/failures.test.ts` for agent timeout, build failure, unreachable hosting, cost ceiling, and empty diff — each producing its own vocabulary entry and leaving the public site unchanged (FR-034)
+- [ ] T088 [P] [US5] Write a failing test in `tests/integration/recovery.test.ts` asserting that a request abandoned by a process restart is recorded as abandoned when the stale lock is broken, and that the conversation renders it as interrupted
+
+### Implementation
+
+- [ ] T089 [US5] Implement the failure taxonomy and its client-facing vocabulary in `src/lib/jobs/messages.ts`
+- [ ] T090 [US5] Implement cost-ceiling enforcement and the alert to the configured contact in `src/lib/jobs/run.ts` (FR-014)
+- [ ] T091 [US5] Feed preview build failure detail into the next request's prompt in `src/lib/jobs/prompt.ts` (FR-023)
+- [ ] T092 [US5] Implement stale-lock recovery writing an `abandoned` record in `src/lib/lock/lock.ts`
+- [ ] T093 [US5] Handle the empty-diff case in `src/lib/jobs/run.ts`, reporting that nothing needed changing and creating no pull request
+
+---
+
+## Phase 8: Polish & Cross-Cutting Concerns
+
+- [ ] T094 [P] Write the end-to-end journey `tests/e2e/request-to-preview.spec.ts` against a fixture site
+- [ ] T095 [P] Write the end-to-end journey `tests/e2e/approve-and-undo.spec.ts`
+- [ ] T096 [P] Add a stage-timing check to `tests/e2e/request-to-preview.spec.ts` asserting first feedback within 10 seconds and a stage update within 60 (SC-003)
+- [ ] T097 [P] Audit every client-facing string against Principle I in `tests/unit/messages.test.ts`, asserting no file paths, diffs, or build logs appear in the vocabulary
+- [ ] T098 Confirm the gate module imports neither `dockerode` nor any network client, enforced by a lint rule in `eslint.config.mjs`
+- [ ] T099 [P] Record a real Netlify deploy payload into `tests/fixtures/netlify/` and reconcile the correlation fields with R4's assumption
+- [ ] T100 Walk quickstart.md end to end on a clean host and correct any step that does not work verbatim
+
+---
+
+## Dependencies
+
+```text
+Setup (T001–T007)
+   └─ Foundational (T008–T047)   ← blocks everything below
+         ├─ US1 (T048–T066)      P1, MVP
+         │     └─ US3 (T067–T072)   P2, extends the gate US1 already uses
+         │           └─ US2 (T073–T079)   P2, publishing after limits are enforced
+         ├─ US4 (T080–T086)      P3, independent of US1 once Foundational is done
+         └─ US5 (T087–T093)      P3, hardens paths introduced by US1 and US2
+                └─ Polish (T094–T100)
+```
+
+US3 is sequenced before US2 despite equal priority: publishing without an enforced gate is the
+unsafe ordering, and the spec makes both P2 precisely because they belong together.
+
+## Parallel Opportunities
+
+- **Setup**: T003–T007 together.
+- **Foundational**: all test-writing tasks (T008, T010, T012, T014, T016, T018, T020, T021, T023, T025, T027, T029, T030, T032, T034, T036, T038, T041, T043, T044, T046) are independent files and can be written in parallel before their implementations.
+- **US1**: T061, T062, T065, T066 touch separate files and can proceed alongside the route work.
+- **Cross-story**: once Foundational completes, US4 can proceed alongside US1 — it shares no files.
+
+## Implementation Strategy
+
+**MVP is US1 alone.** It delivers a client who can commission changes and see them previewed,
+with publishing done by the developer. Everything after it is an increment that can ship
+separately.
+
+**Recommended order**: Foundational → US1 → US3 → US2 → US5 → US4 → Polish. US4 is last among
+the stories because the first installation can be configured by hand while the loop is proven;
+it becomes urgent only for the second client.
+
+**Test-first is not optional here.** T020–T022 in particular: the gate is the only thing standing
+between an autonomous agent and a client's live website, and it is the one module that must be
+correct before anything it protects exists.
