@@ -16,6 +16,8 @@
 - Q: With the interface already preventing a second request while one is running, is a system-level lock still wanted? (OD-003) → A: Yes. The interface disables further input, and behind it the worker claims an exclusive, atomically created marker in the site's repository before starting, releasing it when the request ends.
 - Q: Where does the sites-and-permitted-users configuration live, and how is it edited? (OD-001) → A: The question dissolves: the product is installed once per website, the way a self-hosted content system is. A developer installs and configures it for one client site; there is no multi-site administration and no tenancy.
 - Q: How does the person with configuration privileges authenticate? → A: A passkey, or a password with a second factor. This credential can change a live website, so a single password is insufficient.
+- Q: Where do post-install settings live — permitted sign-ins, cost ceiling, alert contact? (OD-006) → A: In the site's own repository alongside the declared policy and agent guidance, with secrets remaining in deployment configuration. The agent is forbidden from editing that location.
+- Q: Which conditions should trigger reconsidering the no-database decision? (OD-005) → A: None during the minimum viable product. It ships with no datastore. A requirement that appears to need one is dropped from scope rather than met by adding storage, and the decision is revisited only after the loop is proven.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -207,8 +209,12 @@ with the conversation still usable.
 - A hosting build succeeds but produces a blank or broken page: the preview is still
   shown; the client is the judge, and undo exists after publish.
 - Repository access is revoked mid-job.
-- A published conversation is reopened with a new request: it starts a fresh change
-  rather than reusing a merged one.
+- A published conversation is reopened with a new request: it starts a fresh change rather
+  than reusing a merged one.
+- The settings file is edited into an invalid state: the installation keeps running on the
+  last valid settings and reports the fault, rather than admitting everyone or no one.
+- A client request would, if satisfied, require editing the settings or policy themselves:
+  the request is refused and the client is told this needs their developer.
 - The agent produces no changes at all: the client is told nothing needed changing, and
   no empty preview is created.
 - The agent's cost for a single request exceeds a configured ceiling: the job stops and
@@ -233,6 +239,18 @@ with the conversation still usable.
 - **FR-003b**: System MUST validate its configuration at startup and report a specific,
   actionable error for each unreachable or invalid setting, rather than failing at the
   first client request.
+- **FR-003c**: Non-secret settings — permitted sign-ins, cost ceiling, alert contact —
+  MUST be read from a declared location in the site's own repository, alongside the site's
+  policy and agent guidance, so that changing them is a reviewable, versioned edit rather
+  than a redeployment.
+- **FR-003d**: Secrets MUST NOT be stored in the site's repository. They MUST be supplied
+  as deployment configuration.
+- **FR-003e**: System MUST forbid the agent from changing the declared location holding
+  settings, policy, and agent guidance, regardless of what a site's own policy declares.
+  A change that governs the agent may not be authored by the agent.
+- **FR-003f**: System MUST detect an invalid or unparseable settings file and MUST
+  continue running on the last valid settings it holds, reporting the fault to the alert
+  contact, rather than failing open on access control.
 - **FR-004**: Clients MUST NOT be exposed to repository, hosting, or branch configuration.
 
 **Conversation and change requests**
@@ -297,8 +315,10 @@ with the conversation still usable.
   write it to the repository, and MUST explain the block to the client in plain language
   naming the protected area.
 - **FR-019**: System MUST apply a default protective policy — at minimum covering
-  environment and secret files, dependency manifests and lockfiles, and continuous
-  integration and hosting configuration — when a site declares none.
+  environment and secret files, dependency manifests and lockfiles, continuous integration
+  and hosting configuration, and the location holding the site's settings, policy, and
+  agent guidance — when a site declares none. The protection of that last location is not
+  waivable by a site's own policy.
 - **FR-020**: System MUST supply repository-declared written guidance to the agent as
   instructions, while treating the machine-readable policy as the enforced boundary.
 
@@ -369,6 +389,8 @@ with the conversation still usable.
 - **Preview**: A private, viewable build of a pending change, with its status and address.
 - **Publication**: A record of a change made public, and of any undo applied to it.
 - **Policy**: The declared, machine-readable limits on what a site's agent may change.
+  Lives in the site's repository beside the site's settings and agent guidance, in a
+  location the agent itself may never edit.
 - **Audit record**: An unalterable record of who approved, published, or undid what, and
   when.
 
@@ -431,7 +453,9 @@ than duplicated.
   product introduces no application database in this phase; durable state is limited to a
   small configuration of which sites exist and who may access them. Requirements are
   written so that they can be satisfied by reading from and writing back to those systems.
-- Accepting that constraint means accepting its consequences at pilot scale: dashboard
+- The minimum viable product ships with no datastore of any kind. Where a requirement
+  cannot be satisfied without one, it is removed from this phase rather than met by adding
+  storage. Accepting that constraint means accepting its consequences at pilot scale: dashboard
   reads are bounded by third-party API latency and rate limits, concurrency control is
   process-local, and cross-site reporting is unavailable. These are acceptable for 3-5
   clients and are the trigger conditions for revisiting the decision.
@@ -446,9 +470,10 @@ Deliberately unresolved here; to be settled during planning, not by assumption.
   model. Configuration belongs to the installation and is set by the developer who installs
   it. See FR-001a and FR-003 through FR-003b. What remains open is the configuration
   surface itself, recorded as OD-006.
-- **OD-006**: Whether configuration is edited through a screen in the installed product or
-  through deployment configuration only, and where an edited configuration is persisted
-  given that the product keeps no application database.
+- ~~**OD-006**~~: Resolved 2026-09-02 — non-secret settings live in the site's own
+  repository beside its policy and agent guidance; secrets stay in deployment
+  configuration; the agent may not edit that location. See FR-003c through FR-003f and
+  FR-019.
 - ~~**OD-002**~~: Resolved 2026-09-02 — written back to the version control system as one
   comment per finished request, prose plus embedded machine-readable metadata. See FR-009a
   and FR-009b.
@@ -456,5 +481,10 @@ Deliberately unresolved here; to be settled during planning, not by assumption.
   created exclusive marker held in the site's repository, valid across processes, with a
   staleness timeout. See FR-007a through FR-007c.
 - **OD-004**: How email notification is made idempotent without a delivery record.
-- **OD-005**: What the trigger conditions are for introducing a datastore, stated
-  concretely enough to recognise when they are met.
+  Deliberately deferred to planning: low impact, and constrained enough by the no-datastore
+  decision that the options are few.
+- ~~**OD-005**~~: Resolved 2026-09-02 — the minimum viable product ships with no
+  datastore, and that is not revisited within its scope. A requirement that cannot be met
+  without storage is dropped from this phase rather than satisfied by introducing storage.
+  Trigger conditions for a later phase are deliberately not enumerated now, to avoid
+  designing for a reversal that may never be needed.
