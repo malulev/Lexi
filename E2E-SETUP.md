@@ -89,18 +89,34 @@ Two caveats worth stating plainly:
 
 ## What I do with it
 
-- Generate `SESSION_SECRET`, `CONFIG_PASSWORD_HASH`, `CONFIG_TOTP_SECRET`, and
-  `NETLIFY_WEBHOOK_SECRET`, and give you the lines to paste — none of these need
-  to be meaningful for this test.
+- Write the tooling that mints `SESSION_SECRET`, `NETLIFY_WEBHOOK_SECRET`,
+  `CONFIG_PASSWORD_HASH` and `CONFIG_TOTP_SECRET` — you run it, so the values
+  land in the file without passing through a transcript:
+
+  ```bash
+  npm run gen:secrets -- --password 'a console password you pick' >> .env.local
+  ```
+
 - Commit `.webagent/config.yml` and `.webagent/policy.yml` to your test
   repository.
 - Build the agent image: `docker build -t webagent/agent:latest agent/`.
 - Start the app, sign in, and drive the loop.
 
-You do: create `.env.local` from `.env.example`, paste in the four credentials
-and the four generated values. Tell me when it exists — I verify it parses
-without reading it (`npm run check:env` reports which variables are missing or
-malformed, never their values).
+You do:
+
+```bash
+cp .env.example .env.local
+npm run gen:secrets -- --password 'a console password you pick' >> .env.local
+# then fill in the four credentials and the five plain values by hand
+npm run check:env
+```
+
+`check:env` reports which variables are missing, malformed, or present but
+empty, and never prints a value — which is how I can confirm the file is correct
+without being able to read it.
+
+Never paste a credential, or command output containing one, into the chat. Give
+me the path to the `.pem`; the rest stays in the file.
 
 ## What the test will show you
 

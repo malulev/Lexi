@@ -17,7 +17,8 @@
     "test:int": "vitest run --project int",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check:env": "tsx scripts/check-env.ts"
+    "check:env": "tsx scripts/check-env.ts",
+    "gen:secrets": "tsx scripts/gen-secrets.ts"
   },
   "dependencies": {
     "argon2": "^0.45.1",
