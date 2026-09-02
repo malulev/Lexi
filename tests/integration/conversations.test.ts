@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { beginRequest, runRequest } from '@/lib/jobs/run';
-import { branchFor, readConversation, renderClientMessage } from '@/lib/conversations';
+import {
+  branchFor,
+  claimConversationBranch,
+  readConversation,
+  renderClientMessage,
+} from '@/lib/conversations';
 import { parseComment } from '@/lib/record/record';
 import type { Deploy } from '@/lib/netlify/types';
 import { createFakeMailer, notifyOnce } from '@/lib/notify/email';
@@ -52,8 +57,10 @@ function editsTheHomepage(headline: string) {
   };
 }
 
-async function openConversation(client: Harness['client'], branch: string) {
-  await client.createRef(`refs/heads/${branch}`, 'fake-genesis-commit');
+/** Opened the way the route opens one, so the head is a commit ahead of its base. */
+async function openConversation(client: Harness['client']) {
+  const base = await client.getRef('refs/heads/main');
+  const { branch } = await claimConversationBranch(client, base!.sha);
   return client.createPullRequest({
     title: 'Shorten the headline',
     head: branch,
@@ -65,7 +72,7 @@ async function openConversation(client: Harness['client'], branch: string) {
 describe('sending one change request', () => {
   it('pushes the change and reports a preview, leaving the default branch alone', async () => {
     harness = await createHarness({ script: editsTheHomepage('Built for speed') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const outcome = await runRequest(harness.deps, {
@@ -91,7 +98,7 @@ describe('sending one change request', () => {
 
   it('writes one durable record a client can read as prose and a dashboard can parse', async () => {
     harness = await createHarness({ script: editsTheHomepage('Built for speed') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     await runRequest(harness.deps, {
@@ -117,7 +124,7 @@ describe('sending one change request', () => {
 
   it('releases the lock when the request ends, so the next request is not refused', async () => {
     harness = await createHarness({ script: editsTheHomepage('Built for speed') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     await runRequest(harness.deps, {
@@ -136,7 +143,7 @@ describe('a second request while one is in flight', () => {
   it('is refused rather than queued, which is what the disabled input cannot enforce (FR-007b)', async () => {
     // A slow agent keeps the first request — and so the lock — in flight.
     harness = await createHarness({ script: { ...editsTheHomepage('Slow'), delayMs: 200 } });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const first = await beginRequest(harness.deps, {
@@ -164,7 +171,7 @@ describe('a second request while one is in flight', () => {
 
   it('runs exactly one agent, whatever the second caller asked for', async () => {
     harness = await createHarness({ script: { ...editsTheHomepage('Slow'), delayMs: 200 } });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const input = {
@@ -202,7 +209,7 @@ describe('a follow-up message', () => {
         },
       },
     });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const input = {
@@ -231,7 +238,7 @@ describe('a follow-up message', () => {
 
   it('carries the earlier turns into the agent’s prompt, since each container starts fresh', async () => {
     harness = await createHarness({ script: editsTheHomepage('Second') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     await harness.client.createComment(pullRequest.number, renderClientMessage('Say First'));
@@ -270,7 +277,7 @@ describe('a change the site does not permit', () => {
       },
     });
 
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
 
     const outcome = await runRequest(harness.deps, {
       conversationNumber: pullRequest.number,
@@ -312,7 +319,7 @@ describe('a request that changes nothing', () => {
       },
     });
 
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
 
     const outcome = await runRequest(harness.deps, {
       conversationNumber: pullRequest.number,
@@ -332,7 +339,7 @@ describe('a request that changes nothing', () => {
 describe('telling the client their preview is ready', () => {
   it('sends once, and stays silent when asked to send the same event again (OD-004)', async () => {
     harness = await createHarness({ script: editsTheHomepage('Built for speed') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const outcome = await runRequest(harness.deps, {
@@ -369,7 +376,7 @@ describe('telling the client their preview is ready', () => {
 
   it('names no file path, preview address, or git word in what the client reads', async () => {
     harness = await createHarness({ script: editsTheHomepage('Built for speed') });
-    const pullRequest = await openConversation(harness.client, branchFor(1));
+    const pullRequest = await openConversation(harness.client);
     harness.netlify.addDeploy(previewDeploy(pullRequest.number));
 
     const outcome = await runRequest(harness.deps, {
@@ -399,5 +406,87 @@ describe('telling the client their preview is ready', () => {
     expect(body).not.toContain('src/index.html');
     expect(body).not.toContain('netlify.app');
     expect(body).not.toMatch(/\b(commit|branch|pull request|merge|diff)\b/i);
+  });
+});
+
+/**
+ * Every ending has to survive the round trip.
+ *
+ * The durable record is the only place a request's outcome lives, and a record
+ * this product writes but cannot read back is worse than no record: the turn
+ * degrades into an unattributed comment, so the client is shown a bare sentence
+ * with no outcome attached and the machine-readable block leaks into view.
+ */
+describe('a request that ends without changing anything', () => {
+  it('reads back as the agent\'s own turn, carrying its outcome', async () => {
+    harness = await createHarness({
+      script: {
+        result: {
+          summary: 'Nothing needed changing.',
+          filesChanged: [],
+          tokensIn: 10,
+          tokensOut: 2,
+          costUsd: 0.01,
+        },
+        async edit() {
+          // Deliberately touches nothing: the model decided there was nothing to do.
+        },
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Make it better',
+      history: [],
+    });
+
+    const detail = await readConversation(harness.client, pullRequest.number);
+    const turn = detail!.messages.at(-1);
+
+    expect(turn?.author).toBe('agent');
+    expect(turn?.outcome).toBe('failed');
+    expect(turn?.errorCode).toBe('nothing_to_change');
+    // The block is machine-readable and stays out of what a client reads.
+    expect(turn?.text).not.toContain('webagent:v1');
+  });
+
+  it('leaves exactly one record block on the comment, however often it is rewritten', async () => {
+    harness = await createHarness({
+      script: {
+        result: { summary: 'Nothing needed changing.', filesChanged: [], tokensIn: 10, tokensOut: 2, costUsd: 0.01 },
+        async edit() {},
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Make it better',
+      history: [],
+    });
+
+    const detail = await readConversation(harness.client, pullRequest.number);
+    await notifyOnce(
+      { mailer: createFakeMailer(), client: harness.client, env: harness.deps.env },
+      {
+        event: 'request_failed',
+        conversation: { number: pullRequest.number, title: 'Make it better' },
+        commentId: detail!.lastRecordCommentId!,
+        record: detail!.records.at(-1)!,
+        recipients: ['client@example.com'],
+      },
+    );
+
+    const comments = await harness.client.listComments(pullRequest.number);
+    const recordComment = comments.find((comment) => comment.body.includes('webagent:v1'))!;
+    const blocks = recordComment.body.split('<!-- webagent:v1').length - 1;
+
+    expect(blocks).toBe(1);
+    expect(parseComment(recordComment).record?.outcome).toBe('failed');
   });
 });

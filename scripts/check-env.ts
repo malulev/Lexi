@@ -13,7 +13,13 @@ import { parseEnv } from '../src/lib/config/env';
  * reason.
  */
 
-const ENV_FILE = new URL('../.env.local', import.meta.url);
+/**
+ * The order Next.js loads these in, lowest precedence first. A value in
+ * `.env.local` wins over the same name in `.env`, which is exactly the trap
+ * this script exists to expose: a stale key left in `.env.local` silently
+ * overrides a correct one in `.env`.
+ */
+const ENV_FILES = ['.env', '.env.local'] as const;
 
 /**
  * A deliberately small dotenv reader. `KEY=value`, plus the double-quoted form
@@ -49,12 +55,29 @@ function reportPrivateKeyShape(key: string | undefined): string | null {
 }
 
 function main(): void {
-  let raw: Record<string, string>;
-  try {
-    raw = readEnvFile(ENV_FILE);
-  } catch {
-    console.error('.env.local does not exist. Copy .env.example to .env.local and fill it in.');
+  const perFile = new Map<string, Record<string, string>>();
+  for (const name of ENV_FILES) {
+    try {
+      perFile.set(name, readEnvFile(new URL(`../${name}`, import.meta.url)));
+    } catch {
+      // An absent file is not a fault; only an empty result across all of them is.
+    }
+  }
+
+  if (perFile.size === 0) {
+    console.error('No .env or .env.local found. Copy .env.example to .env.local and fill it in.');
     process.exit(1);
+  }
+
+  const raw: Record<string, string> = {};
+  for (const values of perFile.values()) Object.assign(raw, values);
+
+  // A name defined in more than one file is reported, because the losing copy
+  // is invisible and the winning one is not the one most people are editing.
+  const base = perFile.get('.env') ?? {};
+  const shadowed = Object.keys(perFile.get('.env.local') ?? {}).filter((name) => name in base);
+  if (shadowed.length > 0) {
+    console.warn(`Defined in both .env and .env.local; .env.local wins: ${shadowed.join(', ')}`);
   }
 
   const faults: string[] = [];
@@ -76,8 +99,8 @@ function main(): void {
   }
 
   if (faults.length > 0) {
-    const noun = found.length === 1 ? 'variable' : 'variables';
-    faults.push(`.env.local defines ${found.length} ${noun}: ${found.join(', ') || '(none)'}`);
+    const where = [...perFile].map(([name, v]) => `${name} (${Object.keys(v).length})`).join(', ');
+    faults.push(`Read ${where}. Names seen: ${found.join(', ') || '(none)'}`);
     if (blank.length > 0) faults.push(`Present but empty: ${blank.join(', ')}`);
   }
 
@@ -89,7 +112,8 @@ function main(): void {
     process.exit(1);
   }
 
-  console.log(`.env.local parses. ${found.length} variables set; none printed.`);
+  const where = [...perFile].map(([name]) => name).join(' + ');
+  console.log(`${where} parses. ${found.length} variables set; none printed.`);
 }
 
 main();

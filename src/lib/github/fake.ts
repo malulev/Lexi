@@ -129,8 +129,20 @@ async function createPullRequest(
   ctx: Ctx,
   input: { title: string; head: string; base: string; body: string },
 ): Promise<PullRequestInfo> {
-  const number = ctx.counters.nextPrNumber++;
   const headSha = ctx.state.refs[headsRef(input.head)]?.sha ?? nextSha(ctx);
+
+  // GitHub answers 422 "No commits between <base> and <head>" for a head that
+  // is not ahead of its base, and a fake that accepts it lets a branch opened
+  // at the base SHA pass every test and fail against the real API.
+  const baseSha = ctx.state.refs[headsRef(input.base)]?.sha;
+  if (baseSha !== undefined && baseSha === headSha) {
+    throw new Error(
+      `github create pull request from ${input.head} failed for fake/repo: ` +
+        `No commits between ${input.base} and ${input.head}`,
+    );
+  }
+
+  const number = ctx.counters.nextPrNumber++;
   const pr: PullRequestInfo = {
     number,
     title: input.title,

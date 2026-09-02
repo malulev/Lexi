@@ -20,6 +20,16 @@ export interface ConfigCache {
   /** The most recent fault, or null if the last refresh (if any) succeeded. */
   fault(): SettingsFault | null;
   refresh(): Promise<{ ok: true; config: RepoConfig } | { ok: false; fault: SettingsFault }>;
+  /**
+   * The config, loading it first if nothing ever has. Rejects with the load's
+   * own error when there is still nothing to serve.
+   *
+   * This is the "at startup" half of "at startup and on change", deferred to
+   * the first caller that actually needs configuration. It is not a
+   * per-request read: once a config is in hand, this never touches the network
+   * again, so a later GitHub outage cannot take requests down.
+   */
+  ensureLoaded(): Promise<RepoConfig>;
 }
 
 export function createConfigCache(
@@ -29,6 +39,9 @@ export function createConfigCache(
   const now = deps.now ?? (() => new Date());
   let current: RepoConfig | null = null;
   let fault: SettingsFault | null = null;
+  // Concurrent first requests share one load rather than each starting their
+  // own, and a failed load is not remembered — the next caller may retry.
+  let firstLoad: Promise<RepoConfig> | null = null;
 
   async function refresh(): ReturnType<ConfigCache['refresh']> {
     try {
@@ -48,9 +61,29 @@ export function createConfigCache(
     }
   }
 
+  async function ensureLoaded(): Promise<RepoConfig> {
+    if (current) return current;
+    if (firstLoad) return firstLoad;
+
+    firstLoad = refresh().then((result) => {
+      if (result.ok) return result.config;
+      throw new Error(result.fault.message);
+    });
+
+    try {
+      return await firstLoad;
+    } finally {
+      // Cleared either way. On success `current` is the fast path from here on;
+      // on failure the next caller gets a fresh attempt rather than the old
+      // rejection, since the fault may well have been transient.
+      firstLoad = null;
+    }
+  }
+
   return {
     current: () => current,
     fault: () => fault,
     refresh,
+    ensureLoaded,
   };
 }

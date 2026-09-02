@@ -26,8 +26,9 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
   const installation = getInstallation();
   const { client, config } = installation;
 
-  const settings = config.current();
-  if (!settings) throw new Error('configuration has never loaded; refusing to run a request');
+  // A cold process has never read the repository's settings, and there is no
+  // safe default to invent for a file that says what a change may touch.
+  const settings = await config.ensureLoaded();
 
   const detail = await readConversation(client, input.conversationNumber);
   if (!detail) throw new Error(`conversation ${input.conversationNumber} does not exist`);

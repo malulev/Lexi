@@ -1,3 +1,4 @@
+import { RefAlreadyExistsError } from '@/lib/github/types';
 import type { CommentInfo, PullRequestInfo, RepoClient } from '@/lib/github/types';
 import { parseComment } from '@/lib/record/record';
 import type { Conversation, Message, RequestRecord } from '@/types';
@@ -20,6 +21,53 @@ export const BRANCH_PREFIX = 'webagent/c-';
 
 export function branchFor(conversationNumber: number): string {
   return `${BRANCH_PREFIX}${conversationNumber}`;
+}
+
+/**
+ * The commit a conversation's branch starts at.
+ *
+ * A pull request cannot exist without one: GitHub refuses a head that is not
+ * ahead of its base, so a branch cut at the default branch's tip has nothing
+ * to open a pull request from. This commit changes no file — it reuses the
+ * base commit's tree — and exists only so the conversation has somewhere to
+ * live before any change has been made. Principle II is untouched: it lands on
+ * the conversation's own branch, never on the default branch.
+ */
+const ANCHOR_MESSAGE = 'open a conversation';
+
+/**
+ * Cuts a branch for a new conversation and returns its name.
+ *
+ * The name embeds the pull request number, which does not exist until the pull
+ * request does, so the number is predicted from the highest one seen. Ref
+ * creation is a compare-and-swap, so a prediction another process already took
+ * is observed rather than silently overwritten, and the next number is tried.
+ * Everything downstream reads the pull request's own `headRef`, so a wrong
+ * prediction costs a misleading branch name and nothing else.
+ */
+export async function claimConversationBranch(
+  client: RepoClient,
+  baseSha: string,
+): Promise<{ branch: string; sha: string }> {
+  const existing = await client.listPullRequests();
+  const highest = existing.reduce((max, pullRequest) => Math.max(max, pullRequest.number), 0);
+
+  // One anchor commit serves every attempt: it is the same commit whichever
+  // name ends up pointing at it, and an attempt that loses the race leaves it
+  // unreferenced rather than leaving a branch behind.
+  const sha = await client.createLockCommit(ANCHOR_MESSAGE, baseSha);
+
+  for (let offset = 1; offset <= 10; offset += 1) {
+    const branch = branchFor(highest + offset);
+    try {
+      await client.createRef(`refs/heads/${branch}`, sha);
+      return { branch, sha };
+    } catch (cause) {
+      if (!(cause instanceof RefAlreadyExistsError)) throw cause;
+    }
+  }
+
+  throw new Error('could not claim a branch name for a new conversation');
 }
 
 export function renderClientMessage(text: string): string {

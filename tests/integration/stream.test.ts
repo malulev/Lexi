@@ -2,7 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { branchFor, readConversation } from '@/lib/conversations';
+import { claimConversationBranch, readConversation } from '@/lib/conversations';
 import { beginRequest, runRequest } from '@/lib/jobs/run';
 import type { Deploy } from '@/lib/netlify/types';
 import type { JobEvent, Stage } from '@/types';
@@ -51,9 +51,10 @@ function editingScript(output: string[] = []) {
   };
 }
 
+/** Opened the way the route opens one, so the head is a commit ahead of its base. */
 async function openConversation(harnessed: Harness) {
-  const branch = branchFor(1);
-  await harnessed.client.createRef(`refs/heads/${branch}`, 'fake-genesis-commit');
+  const base = await harnessed.client.getRef('refs/heads/main');
+  const { branch } = await claimConversationBranch(harnessed.client, base!.sha);
   const pullRequest = await harnessed.client.createPullRequest({
     title: 'Shorten the headline',
     head: branch,

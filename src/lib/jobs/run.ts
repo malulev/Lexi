@@ -446,7 +446,38 @@ async function finish(
   return { started: true, requestId: result.requestId, outcome: record.outcome, record };
 }
 
+/**
+ * What a `failed` record says when the failure had nothing more specific to
+ * add.
+ *
+ * The record schema requires a detail on every failure, and it is right to:
+ * a failure with no explanation is the one a developer most needs explained.
+ * Several endings are fully described by their code alone, though, so rather
+ * than let them write a record this product cannot read back, each gets a
+ * sentence here. These are diagnostic, never shown to a client — the prose
+ * beside the block is what a client reads (Principle I).
+ */
+const DEFAULT_ERROR_DETAIL: Partial<Record<ErrorCode, string>> = {
+  agent_timeout: 'the agent was still running when maxRequestMinutes elapsed and was killed',
+  cost_ceiling: 'the run would have exceeded costCeilingUsd and was stopped before pushing',
+  nothing_to_change: 'the agent exited successfully having modified no file in the working tree',
+  site_unreachable: 'the hosting provider reported no deploy for this branch within the wait',
+  request_in_flight: 'another request held the installation lock',
+  blocked_by_policy: 'the change touched a path the policy does not permit',
+  out_of_date: 'the branch moved under the request between reading and pushing',
+  build_failed: 'the hosting provider reported a failed build',
+  internal_error: 'an unexpected fault; see the server log for this request id',
+};
+
 function buildRecord(result: FinishInput, stages: StageEvent[], finishedAt: string): RequestRecord {
+  // A failure must arrive with a detail or the record it writes is one this
+  // product cannot parse back, which turns the agent's turn into an
+  // unattributed comment and exposes the block a client should never see.
+  const errorDetail =
+    result.outcome === 'failed' && result.errorCode
+      ? (result.errorDetail ?? DEFAULT_ERROR_DETAIL[result.errorCode])
+      : result.errorDetail;
+
   const record: RequestRecord = {
     requestId: result.requestId,
     startedAt: result.startedAt,
@@ -467,7 +498,7 @@ function buildRecord(result: FinishInput, stages: StageEvent[], finishedAt: stri
     ['violation', result.violation],
     ['blockedPath', result.blockedPath],
     ['errorCode', result.errorCode],
-    ['errorDetail', result.errorDetail],
+    ['errorDetail', errorDetail],
   ];
 
   for (const [key, value] of optional) {

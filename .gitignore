@@ -10,3 +10,4 @@ tsconfig.tsbuildinfo
 coverage/
 test-results/
 playwright-report/
+.webagent-state/

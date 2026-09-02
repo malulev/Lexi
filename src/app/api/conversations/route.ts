@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { branchFor, listConversations, titleFor } from '@/lib/conversations';
-import { RefAlreadyExistsError } from '@/lib/github/types';
+import { claimConversationBranch, listConversations, titleFor } from '@/lib/conversations';
 import { fail, failUnexpectedly, requireClient } from '@/lib/http/guard';
 import { startAndDetach } from '@/lib/http/start-request';
 import { getInstallation } from '@/lib/installation';
@@ -46,7 +45,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const base = await client.getRef(`refs/heads/${defaultBranch}`);
     if (!base) return fail('site_unreachable');
 
-    const branch = await claimBranch(client, base.sha);
+    const { branch } = await claimConversationBranch(client, base.sha);
     const pullRequest = await client.createPullRequest({
       title: titleFor(parsed.data.message),
       head: branch,
@@ -66,27 +65,4 @@ export async function POST(request: Request): Promise<NextResponse> {
   } catch (cause) {
     return failUnexpectedly('creating a conversation', cause);
   }
-}
-
-async function claimBranch(
-  client: ReturnType<typeof getInstallation>['client'],
-  baseSha: string,
-): Promise<string> {
-  const existing = await client.listPullRequests();
-  const highest = existing.reduce((max, pullRequest) => Math.max(max, pullRequest.number), 0);
-
-  // A few attempts, because another process may have taken the predicted number
-  // between the read and the write. Ref creation is a compare-and-swap, so the
-  // collision is observed rather than silently overwritten.
-  for (let offset = 1; offset <= 10; offset += 1) {
-    const branch = branchFor(highest + offset);
-    try {
-      await client.createRef(`refs/heads/${branch}`, baseSha);
-      return branch;
-    } catch (cause) {
-      if (!(cause instanceof RefAlreadyExistsError)) throw cause;
-    }
-  }
-
-  throw new Error('could not claim a branch name for a new conversation');
 }

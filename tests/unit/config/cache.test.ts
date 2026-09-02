@@ -99,4 +99,72 @@ describe('createConfigCache', () => {
 
     expect(cache.fault()?.at).toBe(fixedNow.toISOString());
   });
+
+  /**
+   * Nothing in this product reads configuration until a request needs it, and
+   * a process that has never loaded any has nothing to serve. `ensureLoaded`
+   * is what closes that gap without turning configuration into a per-request
+   * read, which is exactly what this cache exists to avoid.
+   */
+  describe('ensureLoaded', () => {
+    it('loads once when nothing has ever loaded', async () => {
+      const load = vi.fn().mockResolvedValue(makeConfig('first'));
+      const cache = createConfigCache(load);
+
+      const config = await cache.ensureLoaded();
+
+      expect(config).toEqual(makeConfig('first'));
+      expect(load).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not read again once something has loaded', async () => {
+      const load = vi.fn().mockResolvedValue(makeConfig('first'));
+      const cache = createConfigCache(load);
+
+      await cache.ensureLoaded();
+      await cache.ensureLoaded();
+      await cache.ensureLoaded();
+
+      expect(load).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares one read between callers that arrive together', async () => {
+      // Two requests landing on a cold process must not both pay for a load,
+      // and must not race to install different configs.
+      let release: (config: ReturnType<typeof makeConfig>) => void = () => {};
+      const pending = new Promise<ReturnType<typeof makeConfig>>((resolve) => {
+        release = resolve;
+      });
+      const load = vi.fn().mockReturnValue(pending);
+      const cache = createConfigCache(load);
+
+      const both = Promise.all([cache.ensureLoaded(), cache.ensureLoaded()]);
+      release(makeConfig('shared'));
+      const [left, right] = await both;
+
+      expect(load).toHaveBeenCalledTimes(1);
+      expect(left).toEqual(makeConfig('shared'));
+      expect(right).toEqual(makeConfig('shared'));
+    });
+
+    it('reports the fault rather than a config when the first load fails', async () => {
+      const load = vi.fn().mockRejectedValue(new Error('config.yml: file is required'));
+      const cache = createConfigCache(load);
+
+      await expect(cache.ensureLoaded()).rejects.toThrow('config.yml: file is required');
+      expect(cache.current()).toBeNull();
+      expect(cache.fault()).not.toBeNull();
+    });
+
+    it('retries after a failed first load rather than caching the failure', async () => {
+      const load = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('transient'))
+        .mockResolvedValueOnce(makeConfig('recovered'));
+      const cache = createConfigCache(load);
+
+      await expect(cache.ensureLoaded()).rejects.toThrow('transient');
+      await expect(cache.ensureLoaded()).resolves.toEqual(makeConfig('recovered'));
+    });
+  });
 });
