@@ -16,7 +16,8 @@
     "test": "vitest run --project unit",
     "test:int": "vitest run --project int",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "check:env": "tsx scripts/check-env.ts"
   },
   "dependencies": {
     "argon2": "^0.45.1",
@@ -33,6 +34,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@playwright/test": "^1.62.1",
     "@types/dockerode": "^4.0.1",
     "@types/node": "^22.20.1",
@@ -42,11 +44,11 @@
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.39.5",
     "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11",
-    "@eslint/js": "^9.39.5",
     "typescript-eslint": "^8.69.0",
-    "eslint-plugin-react-hooks": "^7.1.1"
+    "vitest": "^4.1.11"
   }
 }

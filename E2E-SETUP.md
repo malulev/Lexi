@@ -67,14 +67,40 @@ That's it. Start Docker Desktop if that command fails.
 
 ---
 
+## How the secrets get in
+
+`.claude/settings.json` denies this session any read of `.env`, `.env.*`, `*.pem`
+and `*.key`. That is deliberate: nothing in this test needs me to see a
+credential, so I am not given the chance to put one in a transcript.
+
+The consequence is that **you** write `.env.local`, not me. I generate the four
+throwaway values and hand you the lines; you paste them in alongside your own
+four credentials.
+
+Two caveats worth stating plainly:
+
+- The deny covers the file-reading tools completely. Shell command patterns are
+  matched on their prefix, so the block there is a guardrail against accident,
+  not a sandbox against a determined process. Treat it as: I will not read your
+  key, not as: I could not.
+- The app I start does load `.env.local` into its own process. The credentials
+  are live during the test — that is the point — they are just never in my
+  context.
+
 ## What I do with it
 
 - Generate `SESSION_SECRET`, `CONFIG_PASSWORD_HASH`, `CONFIG_TOTP_SECRET`, and
-  `NETLIFY_WEBHOOK_SECRET` — none of these need to be meaningful for this test.
-- Write `.env.local` (gitignored) and commit `.webagent/config.yml` and
-  `.webagent/policy.yml` to your test repository.
+  `NETLIFY_WEBHOOK_SECRET`, and give you the lines to paste — none of these need
+  to be meaningful for this test.
+- Commit `.webagent/config.yml` and `.webagent/policy.yml` to your test
+  repository.
 - Build the agent image: `docker build -t webagent/agent:latest agent/`.
 - Start the app, sign in, and drive the loop.
+
+You do: create `.env.local` from `.env.example`, paste in the four credentials
+and the four generated values. Tell me when it exists — I verify it parses
+without reading it (`npm run check:env` reports which variables are missing or
+malformed, never their values).
 
 ## What the test will show you
 
