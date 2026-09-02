@@ -44,22 +44,24 @@ the process. Errors are recorded with the job identifier, the site, and the stag
 finished job's outcome cannot be reconstructed after a restart, the observability is
 incomplete.
 
-### VI. Tenant Isolation by Default
+### VI. One Installation, One Website
 
-Every request is authorized against the acting person's membership at a single choke
-point, not by each handler remembering to filter. Credentials are scoped per site and
-never shared across clients; secrets live in a secrets store, never alongside ordinary
-configuration. Agent execution is sandboxed per job, with no network access to version
-control and no long-lived credentials. A bug in one code path must not be able to expose
-one client's site or conversation to another.
+The product is installed once per website, the way a self-hosted content management system
+is. An installation knows about one site, holds credentials for one site, and can be
+pointed at no other. Isolation between clients is therefore structural: there is no second
+client's data present to leak, and no partitioning logic to get wrong. Every request is
+authorized at a single choke point against the identities that installation is configured
+for. Agent execution is sandboxed per job, with no network access to version control and
+no long-lived credentials. The credential that can change an installation's configuration
+is stronger than the credential that can use it.
 
 ### VII. State Lives Where It Already Lives
 
 The version control system and the hosting provider are the system of record. Pending
 changes, conversation history, published state, and the audit trail are read from them
 rather than mirrored into an application database. Phase 1 introduces no application
-database: durable state is limited to a small configuration describing which sites exist
-and who may access them. Anything else the product needs is either derived on read from
+database: durable state is limited to the installation's own configuration — which site it
+manages and who may sign in. Anything else the product needs is either derived on read from
 the systems above, written back to them, or accepted as ephemeral. A datastore is added
 only against a named, observed pain — not in anticipation of one — and the decision is
 recorded when it is made.
@@ -74,10 +76,12 @@ datastore.
 
 ## Operational Constraints
 
-**Hosting model.** Phase 1 is hosted and operated by the maintainer for a small set of
-pilot clients. The architecture must nonetheless remain self-hostable: no dependency on
-a proprietary orchestration service, and job execution behind a runner interface whose
-default implementation runs on plain Docker.
+**Hosting model.** One installation per client website. Phase 1 installations are hosted
+and operated by the maintainer on clients' behalf, but the same artifact must be
+installable by any developer for their own client: no dependency on a proprietary
+orchestration service, and job execution behind a runner interface whose default
+implementation runs on plain Docker. Operating several instances, and rolling updates
+across them, is the accepted cost of structural isolation.
 
 **Credentials.** Repository write access is via a scoped GitHub App with short-lived
 installation tokens minted per job. Per-site third-party tokens live in a secrets vault
@@ -122,4 +126,4 @@ Versioning follows semantic rules: MAJOR for removing or redefining a principle,
 for adding a principle or materially expanding guidance, PATCH for clarifications that
 do not change meaning.
 
-**Version**: 1.1.0 | **Ratified**: 2026-09-02 | **Last Amended**: 2026-09-02
+**Version**: 1.2.0 | **Ratified**: 2026-09-02 | **Last Amended**: 2026-09-02

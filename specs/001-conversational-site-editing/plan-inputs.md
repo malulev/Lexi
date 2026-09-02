@@ -3,16 +3,26 @@
 Not part of the specification. These are the technical directions already chosen with the
 maintainer, to be fed into the planning phase rather than re-litigated there.
 
+- **Tenancy**: single-tenant. One installation serves one website, installed by a
+  developer for their client. No organisations, no multi-site administration. Isolation is
+  structural.
 - **State**: no application database in phase 1. GitHub and Netlify are the system of
-  record; see Open Decisions OD-001 through OD-005 in the specification for what remains
-  unsettled. Earlier Supabase/Postgres direction is withdrawn.
+  record; see the Open Decisions section of the specification for what remains unsettled.
+  Earlier Supabase/Postgres direction is withdrawn.
+- **Durable job record**: one pull request comment per finished request — prose summary
+  plus an embedded machine-readable block the dashboard parses to rebuild history.
+- **Single-flight**: interface disables input while a request runs; behind it, an
+  atomically created ref in the site's repository acts as the lock, with a staleness
+  timeout equal to the maximum request duration.
+- **Configuration credential**: passkey, or password plus second factor, distinct from the
+  client sign-in.
 - **Dashboard + API**: Next.js App Router. Identity provider for sign-in only, not for
   application data. Progress streamed to the browser directly from the running job.
 - **Agent harness**: OpenCode running against OpenRouter, executed inside a container.
 - **Job execution**: a `JobRunner` interface with a Docker implementation as the only
   v1 backend; hosted by the maintainer, but the compose stack must stay self-hostable.
-- **Queue**: single worker loop, one in-flight job per site, lock held in the running
-  process. No Redis, no jobs table (OD-003).
+- **Queue**: none. One in-flight request per installation, enforced by the repository ref
+  lock; further requests are refused, not queued.
 - **Repository access**: GitHub App with short-lived per-job installation tokens. Push
   happens in the worker, never inside the agent container.
 - **Preview and publish**: the client's existing Netlify site with deploy previews per

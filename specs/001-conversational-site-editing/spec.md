@@ -8,6 +8,15 @@
 
 **Input**: User description: "A visual, AI-powered website manager. Phase 1: a non-technical client opens a chat, describes a change to their live website in plain language, an autonomous agent implements it, the client reviews a private preview, and publishes it live with one click."
 
+## Clarifications
+
+### Session 2026-09-02
+
+- Q: Where does a finished request's durable record live, given there is no application database? (OD-002) → A: One pull request comment per finished request, carrying a plain-language summary for people plus an embedded machine-readable block for the dashboard.
+- Q: With the interface already preventing a second request while one is running, is a system-level lock still wanted? (OD-003) → A: Yes. The interface disables further input, and behind it the worker claims an exclusive, atomically created marker in the site's repository before starting, releasing it when the request ends.
+- Q: Where does the sites-and-permitted-users configuration live, and how is it edited? (OD-001) → A: The question dissolves: the product is installed once per website, the way a self-hosted content system is. A developer installs and configures it for one client site; there is no multi-site administration and no tenancy.
+- Q: How does the person with configuration privileges authenticate? → A: A passkey, or a password with a second factor. This credential can change a live website, so a single password is insufficient.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Request a change and see it in a preview (Priority: P1)
@@ -22,7 +31,7 @@ desktop and mobile widths. The client's public website is untouched.
 
 **Why this priority**: This is the product. Without it there is nothing to preview and
 nothing to approve. It is the smallest slice that delivers standalone value — even with
-no publishing step, a client can commission changes and see them, and the operator can
+no publishing step, a client can commission changes and see them, and their developer can
 publish manually.
 
 **Independent Test**: Sign in as a client of a connected site, send one change request,
@@ -60,7 +69,7 @@ site. If the client later realises the change was wrong, the same conversation o
 when the reversal is live.
 
 **Why this priority**: Publishing is what makes the loop self-service, but the loop still
-delivers value without it (the operator can publish). Undo is bundled here because a
+delivers value without it (the developer can publish). Undo is bundled here because a
 non-technical client will not press a publish button they cannot take back.
 
 **Independent Test**: With an approved preview, press Approve & Deploy and confirm the
@@ -77,7 +86,7 @@ prior content.
    confirms the reversal is live.
 3. **Given** a conversation has been published, **When** the client opens it again,
    **Then** it is clearly marked as published and no longer offers "Approve & Deploy".
-4. **Given** any approval or undo, **When** an operator inspects the record, **Then**
+4. **Given** any approval or undo, **When** the record is inspected afterwards, **Then**
    the acting person, the site, the change, and the time are recorded and cannot be
    altered.
 5. **Given** a preview build failed, **When** the client views the conversation, **Then**
@@ -117,33 +126,35 @@ blocked message.
 
 ---
 
-### User Story 4 - Operator onboards a client and their site (Priority: P3)
+### User Story 4 - A developer installs the product for one client site (Priority: P3)
 
-The operator connects a client's website: granting the system access to the site's code
-repository, linking the site's hosting so previews and publishes work, and inviting the
-client by email. The client receives an invitation, signs in, and sees only their own
-sites.
+A developer deploys their own instance of the product for a single client website. They
+point it at that site's code repository and its hosting, grant the access it needs, and
+set who may sign in. They hand the client a URL and a sign-in. Nothing about the install
+is shared with any other client or site.
 
-**Why this priority**: Needed for a second client to exist, but the first pilot can be
-connected by the operator through direct configuration. Deliberately kept out of the
-client-facing experience in this phase.
+**Why this priority**: The first install can be configured by hand while the loop is being
+proven, but every client after the first depends on this being repeatable and documented.
 
-**Independent Test**: Connect a repository and hosting for a new site as operator, invite
-an email address, and confirm that account can sign in, sees exactly that site, and sees
-no other organisation's sites.
+**Independent Test**: Follow the installation instructions from nothing to a running
+instance connected to a test site, sign in as the configured client user, and complete a
+change request end to end.
 
 **Acceptance Scenarios**:
 
-1. **Given** an operator with access granted to a client's repository, **When** they
-   create the site record and link its hosting, **Then** the site becomes available for
-   conversations.
-2. **Given** a site exists, **When** the operator invites an email address, **Then** that
-   person can sign in and see that site.
-3. **Given** two client organisations exist, **When** a member of one is signed in,
-   **Then** no data belonging to the other is reachable by any means.
-4. **Given** the client's access is revoked at the repository, **When** a job runs,
-   **Then** it fails with a clear operator-facing error and no partial change is
-   published.
+1. **Given** a developer with access to a client's repository and hosting, **When** they
+   follow the installation instructions, **Then** they reach a running instance connected
+   to exactly that one site.
+2. **Given** a running instance, **When** the configured client signs in, **Then** they
+   see that site's conversations and nothing else exists to see.
+3. **Given** an instance, **When** anyone attempts to reconfigure which site it manages
+   without the configuration credential, **Then** the attempt fails.
+4. **Given** the instance's access to the repository is revoked, **When** a request runs,
+   **Then** it fails with a clear message identifying the missing access, and no partial
+   change is published.
+5. **Given** an installation is misconfigured — unreachable repository, wrong hosting
+   reference — **When** it starts, **Then** it reports the specific misconfiguration rather
+   than failing at the first client request.
 
 ---
 
@@ -177,8 +188,12 @@ with the conversation still usable.
 
 ### Edge Cases
 
-- Two people from the same client organisation send requests for the same site at the
-  same time: the second is queued, both see the same shared conversation state.
+- Two people signed in to the same installation send requests at the same time: the second is refused with a plain-language explanation that a change is already
+  being applied, and both see the same shared conversation state.
+- A client's browser holds a stale page that still allows typing while a request is in
+  progress: the submission is refused by the system, not merely by the interface.
+- A request crashes without releasing its exclusive marker: the next request proceeds once
+  the marker is older than the maximum request duration.
 - A client opens two conversations for the same site and publishes both: the second
   publish must incorporate the first, or be blocked as out of date rather than silently
   reverting it.
@@ -197,21 +212,27 @@ with the conversation still usable.
 - The agent produces no changes at all: the client is told nothing needed changing, and
   no empty preview is created.
 - The agent's cost for a single request exceeds a configured ceiling: the job stops and
-  the operator is alerted.
+  the installation's configured contact is alerted.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
-**Access and tenancy**
+**Installation, access, and configuration**
 
-- **FR-001**: System MUST require authentication for all client-facing surfaces.
-- **FR-002**: System MUST scope every site, conversation, message, and deploy record to a
-  single client organisation, and MUST prevent any member of one organisation from
-  reading or acting on another's data, including through credentials held by the system on
-  their behalf.
-- **FR-003**: Operators MUST be able to create a site, associate it with a client's code
-  repository and hosting, and invite client users by email.
+- **FR-001**: System MUST require authentication for all surfaces.
+- **FR-001a**: An installation MUST manage exactly one website. Isolation between clients
+  is achieved by separate installations, not by partitioning within one.
+- **FR-002**: System MUST restrict every surface to the identities configured for that
+  installation, and MUST hold no data belonging to any other site.
+- **FR-003**: A developer MUST be able to configure, for an installation, the site's code
+  repository, its hosting, and the identities permitted to sign in.
+- **FR-003a**: Configuration changes MUST require a credential distinct from and stronger
+  than a client sign-in — a passkey, or a password combined with a second factor — because
+  that credential can redirect the installation at a different website.
+- **FR-003b**: System MUST validate its configuration at startup and report a specific,
+  actionable error for each unreachable or invalid setting, rather than failing at the
+  first client request.
 - **FR-004**: Clients MUST NOT be exposed to repository, hosting, or branch configuration.
 
 **Conversation and change requests**
@@ -220,8 +241,18 @@ with the conversation still usable.
   requests in natural language.
 - **FR-006**: System MUST treat one conversation as one accumulating change: follow-up
   messages refine the same pending change and refresh the same preview.
-- **FR-007**: System MUST allow at most one request per site to be worked on at a time
-  and MUST queue further requests, showing their queued state.
+- **FR-007**: System MUST allow at most one request per site to be in progress at a time.
+- **FR-007a**: System MUST prevent a client from submitting a further request while one is
+  in progress for that site, by disabling message entry and stating plainly why it is
+  unavailable. Requests are not queued in this phase.
+- **FR-007b**: System MUST additionally enforce single-flight independently of the
+  interface, by acquiring an exclusive marker for the site that is created atomically —
+  such that a second attempt observably fails rather than proceeding — and releasing it
+  when the request ends. Enforcement MUST hold across separate processes and MUST survive
+  a process restart.
+- **FR-007c**: System MUST recover from a marker left behind by a crashed request by
+  treating a marker older than the maximum request duration as abandoned, and MUST record
+  when it does so.
 - **FR-008**: System MUST stream progress stages for an in-flight request to all viewers
   of that conversation without requiring a page refresh.
 - **FR-009**: System MUST retain a durable, ordered history of every completed step of a
@@ -229,6 +260,13 @@ with the conversation still usable.
   after a restart of the system — sees what happened and why. Live output produced while a
   request is running MAY be ephemeral, provided its outcome is recorded durably when the
   request ends.
+- **FR-009a**: System MUST record each finished request as a single durable entry against
+  that conversation's pending change, containing both a plain-language summary readable by
+  a person and a machine-readable block sufficient for the dashboard to reconstruct the
+  request's stages, outcome, extent of change, and cost without re-running it.
+- **FR-009b**: System MUST reconstruct a conversation's client-facing history solely from
+  those durable entries and the state of the pending change, holding no history of its
+  own.
 - **FR-010**: System MUST present a plain-language summary of what changed, and MUST NOT
   require the client to read code, diffs, file paths, or build logs.
 
@@ -240,10 +278,11 @@ with the conversation still usable.
 - **FR-012**: System MUST enforce a maximum duration for a single request and MUST end the
   attempt cleanly when exceeded.
 - **FR-013**: System MUST make the model used, tokens consumed, and cost of each request
-  retrievable and attributable to the site and organisation. The record MAY live in an
-  external system rather than in the product.
-- **FR-014**: System MUST stop a request and alert the operator when its cost exceeds a
-  configured ceiling.
+  retrievable for the installation's site. The record MAY live in an external system
+  rather than in the product; per-client separation follows from each installation using
+  its own model provider credential.
+- **FR-014**: System MUST stop a request and raise an alert to the installation's
+  configured contact when its cost exceeds a configured ceiling.
 - **FR-015**: The agent's execution environment MUST NOT hold any credential capable of
   writing to the site's repository or hosting.
 
@@ -275,8 +314,8 @@ with the conversation still usable.
 
 **Approval, publish, and undo**
 
-- **FR-025**: Any invited member of the owning organisation MUST be able to approve and
-  publish a pending change.
+- **FR-025**: Any client identity configured for the installation MUST be able to approve
+  and publish a pending change.
 - **FR-026**: System MUST publish only on explicit human approval; no change may reach the
   public website automatically.
 - **FR-027**: System MUST offer approval only when a successful preview exists for the
@@ -309,12 +348,15 @@ with the conversation still usable.
 
 ### Key Entities
 
-- **Organisation**: A client company. Owns sites and has member users. The boundary of all
-  data isolation.
-- **User**: A person who signs in. Belongs to an organisation as a member, or is an
-  operator with administrative reach across organisations.
-- **Site**: One client website. Holds the association to its code repository, its hosting,
-  its public address, and its effective policy.
+- **Installation**: One deployment of the product, serving exactly one website. The unit
+  of isolation, of configuration, and of cost.
+- **Configuration**: The installation's settings — which repository, which hosting, which
+  identities may sign in, which limits apply. Changed only with the configuration
+  credential.
+- **User**: A person who signs in to an installation. Either a client, who may request and
+  publish changes, or a developer, who may also change configuration.
+- **Site**: The one website an installation manages. Holds its code repository, its
+  hosting, its public address, and its effective policy.
 - **Conversation**: An ordered exchange about one site that accumulates into a single
   pending change. Has a lifecycle: open, published, or closed.
 - **Message**: One entry in a conversation, authored by a client, the agent, or the
@@ -350,7 +392,7 @@ than duplicated.
 - **SC-005**: Across a pilot period, zero changes are written to a client repository in
   violation of that site's declared policy.
 - **SC-006**: At least 70% of change requests reach a preview the client approves without
-  needing operator intervention.
+  needing developer intervention.
 - **SC-007**: A published change can be fully reverted within 3 minutes of a client
   pressing undo.
 - **SC-008**: Every completed request has a retrievable, ordered record of its stages and
@@ -360,8 +402,14 @@ than duplicated.
 
 ## Assumptions
 
-- Pilot scope is 3-5 client organisations, each with one website; the system is hosted and
-  operated by the maintainer.
+- The product is installed once per website, in the manner of a self-hosted content
+  management system. Pilot scope is 3-5 such installations, each serving one client's site,
+  hosted and operated by the maintainer on the client's behalf. There is no multi-site
+  administration surface and no shared instance.
+- Running one installation per client is what makes isolation structural rather than
+  enforced: there is no second client's data present to leak. The cost accepted in exchange
+  is operating several instances and rolling updates to each, and having no view across
+  clients.
 - Client websites are code repositories that build to a hosted site with per-branch
   preview builds already available; the product does not provision hosting.
 - Client sites vary in framework and structure; the agent locates what to change by
@@ -372,10 +420,11 @@ than duplicated.
   building the site itself.
 - Each site's developer is available to declare policy and guidance in the repository, and
   to handle requests beyond the product's remit.
-- Onboarding is performed by the operator; self-service signup, billing, and plan limits
-  are out of scope for this phase.
-- One shared model provider account is used across pilot clients; per-client model
-  selection is out of scope for this phase.
+- Installation and configuration are performed by a developer; self-service signup,
+  billing, and plan limits are out of scope for this phase.
+- Each installation uses its own model provider credential, which is what makes per-client
+  cost attribution possible without the product tracking it. Per-client model selection is
+  out of scope for this phase.
 - Clients access the dashboard on desktop browsers; the dashboard itself need not be
   mobile-optimised, though previews must be viewable at mobile widths.
 - The version control system and the hosting provider are the system of record. The
@@ -393,13 +442,19 @@ than duplicated.
 
 Deliberately unresolved here; to be settled during planning, not by assumption.
 
-- **OD-001**: Where the small configuration of sites and permitted users lives, and how it
-  is edited by an operator.
-- **OD-002**: Whether a finished request's durable outcome is written back to the version
-  control system, to a log store, or both — and in what form the client-facing history is
-  rendered from it.
-- **OD-003**: How at-most-one-in-flight-request-per-site is enforced without shared
-  storage, and what happens to that guarantee if the system runs as more than one process.
+- ~~**OD-001**~~: Resolved 2026-09-02 — dissolved by the single-installation-per-site
+  model. Configuration belongs to the installation and is set by the developer who installs
+  it. See FR-001a and FR-003 through FR-003b. What remains open is the configuration
+  surface itself, recorded as OD-006.
+- **OD-006**: Whether configuration is edited through a screen in the installed product or
+  through deployment configuration only, and where an edited configuration is persisted
+  given that the product keeps no application database.
+- ~~**OD-002**~~: Resolved 2026-09-02 — written back to the version control system as one
+  comment per finished request, prose plus embedded machine-readable metadata. See FR-009a
+  and FR-009b.
+- ~~**OD-003**~~: Resolved 2026-09-02 — interface-level prevention plus an atomically
+  created exclusive marker held in the site's repository, valid across processes, with a
+  staleness timeout. See FR-007a through FR-007c.
 - **OD-004**: How email notification is made idempotent without a delivery record.
 - **OD-005**: What the trigger conditions are for introducing a datastore, stated
   concretely enough to recognise when they are met.
