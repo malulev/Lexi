@@ -14,6 +14,8 @@ import type { JobRunner, RunOutcome, RunRequest, RunResult } from './types';
 
 export interface FakeRunnerScript {
   outcome?: RunOutcome;
+  /** The container's exit status. A non-zero one means the agent failed, whatever it left behind. */
+  exitCode?: number;
   output?: string[];
   result?: AgentResult;
   /** Mutates the working tree the way a real agent would, so orchestrator tests are real. */
@@ -52,7 +54,7 @@ async function runScript(request: RunRequest, script: FakeRunnerScript): Promise
   const outcome = script.outcome ?? 'completed';
   return {
     outcome,
-    exitCode: outcome === 'completed' ? 0 : null,
+    exitCode: outcome === 'completed' ? (script.exitCode ?? 0) : null,
     result: outcome === 'completed' ? script.result : undefined,
   };
 }

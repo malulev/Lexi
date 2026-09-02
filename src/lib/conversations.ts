@@ -126,7 +126,10 @@ export async function readConversation(
 
   return {
     conversation: toConversation(pullRequest, previewUrl),
-    messages: comments.map((comment, index) => toMessage(comment, parsed[index]?.record)),
+    messages: comments.flatMap((comment, index) => {
+      const record = parsed[index]?.record;
+      return isOurs(comment, record) ? [toMessage(comment, record)] : [];
+    }),
     records,
     ...lastRecordCommentIdOf(comments, parsed),
   };
@@ -140,6 +143,18 @@ function lastRecordCommentIdOf(
     if (parsed[index]?.record) return { lastRecordCommentId: comments[index]!.id };
   }
   return {};
+}
+
+/**
+ * A pull request is a public place: Netlify's deploy bot announces every build
+ * there, and so does any developer with repository access. Their comments carry
+ * commit shas, deploy logs and file paths, so a conversation is only what this
+ * product itself wrote — the client's marked turns and its own records
+ * (Principle I). `records` is unaffected, being derived from the comments
+ * regardless.
+ */
+function isOurs(comment: CommentInfo, record: RequestRecord | undefined): boolean {
+  return record !== undefined || comment.body.includes(CLIENT_MARKER);
 }
 
 /**

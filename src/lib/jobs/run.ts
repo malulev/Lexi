@@ -284,6 +284,26 @@ async function runAgent(deps: RunDeps, requestId: string, prepared: Prepared): P
     };
   }
 
+  // The container's exit status is the agent's own verdict on its run
+  // (contracts/repo-files.md: "exits 0 ... Exits non-zero on failure"). A
+  // non-zero exit has to end the request here, before the working tree is
+  // examined: an agent that died mid-edit leaves changes behind, and reading
+  // those as the client's requested change would push work nobody stands
+  // behind. Reading their absence as "nothing needed changing" is worse still
+  // — it reports a crash as a considered decision.
+  if (run.exitCode !== null && run.exitCode !== 0) {
+    return {
+      failure: {
+        outcome: 'failed',
+        errorCode: 'internal_error',
+        errorDetail: `the agent container exited with status ${run.exitCode}`,
+        prose: null,
+      },
+      summary,
+      cost,
+    };
+  }
+
   return { summary, cost };
 }
 

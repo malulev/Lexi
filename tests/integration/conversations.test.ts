@@ -490,3 +490,65 @@ describe('a request that ends without changing anything', () => {
     expect(parseComment(recordComment).record?.outcome).toBe('failed');
   });
 });
+
+/**
+ * A container that exits non-zero has failed, whatever it left in the working
+ * tree. Reading that as "nothing needed changing" is not merely an imprecise
+ * label — it reports a failure as a considered decision, and tells the client
+ * their site was looked at when it was not.
+ */
+describe('an agent whose container exits non-zero', () => {
+  it('is reported as a failure, not as nothing needing changing', async () => {
+    harness = await createHarness({
+      script: {
+        exitCode: 1,
+        result: { summary: '', filesChanged: [], tokensIn: 0, tokensOut: 0, costUsd: 0 },
+        async edit() {
+          // The agent died before touching anything.
+        },
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Shorten the headline',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    expect(outcome.record.outcome).toBe('failed');
+    expect(outcome.record.errorCode).toBe('internal_error');
+    expect(outcome.record.errorCode).not.toBe('nothing_to_change');
+  });
+
+  it('still fails even if the agent left an edit behind before dying', async () => {
+    // A partial edit is not a change a client asked for, and committing it
+    // would push work no one stands behind.
+    harness = await createHarness({
+      script: {
+        exitCode: 1,
+        result: { summary: 'half done', filesChanged: ['src/index.html'], tokensIn: 5, tokensOut: 1, costUsd: 0 },
+        async edit(workDir: string) {
+          await writeFile(join(workDir, 'src/index.html'), '<h1>Half written\n', 'utf8');
+        },
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Shorten the headline',
+      history: [],
+    });
+    if (!outcome.started) throw new Error('the request should have started');
+
+    expect(outcome.record.outcome).toBe('failed');
+    expect(outcome.record.errorCode).toBe('internal_error');
+    expect(await branchExists(harness.originDir, pullRequest.headRef)).toBe(false);
+  });
+});

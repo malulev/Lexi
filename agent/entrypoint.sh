@@ -74,19 +74,41 @@ set -e
 
 # --- Write /control/result.json ---
 #
-# NOTE (research.md R1 "open items"): OpenCode's exact `--format json` event
-# shape has not been confirmed against a live run. The field names probed
-# below are a best guess at plausible camelCase/snake_case variants, not a
-# verified contract. Every value defaults to zero/empty rather than the
-# script throwing, because guessing wrong here must degrade gracefully — an
-# agent that otherwise finished the work must not be reported as crashed
-# just because this parsing didn't recognise its event shape. This needs
-# confirming against a live OpenCode run before this is trusted.
+# Confirmed against a live `opencode run --format json` stream (cohere/
+# north-mini-code via OpenRouter, 2026-09-02), not inferred from documentation.
+# Every line is one JSON object sharing an envelope:
+#
+#   { "type": ..., "timestamp": ..., "sessionID": ..., "part": { ... } }
+#
+# All the payload is under `part`; nothing useful sits at the top level. Only
+# `cost` remains unverified — it was 0 for every step because the model was
+# free, so the field's path is confirmed but its behaviour on a paid model is
+# not. Values still default to zero/empty rather than throwing: an agent that
+# finished the work must never be reported as crashed because this parsing did
+# not recognise an event.
 cat > "$WRITE_RESULT_SCRIPT" <<'NODE'
 import { readFile, writeFile } from 'node:fs/promises';
 
-function firstNumber(...candidates) {
-  return candidates.find((value) => typeof value === 'number');
+const WORK_PREFIX = '/work/';
+
+/** The container path an edit reports, as the repository sees it. */
+function toRepoRelative(filePath) {
+  return filePath.startsWith(WORK_PREFIX) ? filePath.slice(WORK_PREFIX.length) : filePath;
+}
+
+/**
+ * A tool call that changed a file, as opposed to one that only looked at one.
+ *
+ * `read` and `glob` carry a `filePath` too, so counting every path seen would
+ * report files the agent merely opened as files it changed. The presence of a
+ * `filediff` is what distinguishes an edit that landed.
+ */
+function editedPathOf(part) {
+  if (part?.type !== 'tool') return undefined;
+  const filediff = part.state?.metadata?.filediff;
+  if (!filediff || typeof filediff.file !== 'string') return undefined;
+  if (part.state?.status !== 'completed') return undefined;
+  return toRepoRelative(filediff.file);
 }
 
 const exitCode = Number(process.env.OPENCODE_EXIT);
@@ -104,22 +126,33 @@ for (const line of lines) {
   try {
     event = JSON.parse(line);
   } catch {
-    continue; // --format json is not guaranteed to make every line a JSON object
+    continue; // --format json does not guarantee every line is a JSON object
   }
   if (typeof event !== 'object' || event === null) continue;
 
-  const usage = (typeof event.usage === 'object' && event.usage !== null) ? event.usage : event;
-  const inputTokens = firstNumber(usage.input_tokens, usage.prompt_tokens, usage.tokensIn);
-  if (inputTokens !== undefined) tokensIn += inputTokens;
-  const outputTokens = firstNumber(usage.output_tokens, usage.completion_tokens, usage.tokensOut);
-  if (outputTokens !== undefined) tokensOut += outputTokens;
-  const cost = firstNumber(event.cost, event.costUsd, usage.cost);
-  if (cost !== undefined) costUsd += cost;
+  const part = event.part;
+  if (typeof part !== 'object' || part === null) continue;
 
-  const path = typeof event.path === 'string' ? event.path : typeof event.file === 'string' ? event.file : undefined;
-  if (path) filesChanged.add(path);
+  // Each step reports its own request's usage, and `input` re-counts the whole
+  // context every turn. Summing is deliberate: that is what the provider bills,
+  // whereas the final step alone would only describe the last context size.
+  if (event.type === 'step_finish') {
+    if (typeof part.tokens?.input === 'number') tokensIn += part.tokens.input;
+    if (typeof part.tokens?.output === 'number') tokensOut += part.tokens.output;
+    if (typeof part.cost === 'number') costUsd += part.cost;
+  }
 
-  if (typeof event.summary === 'string') summary = event.summary;
+  if (event.type === 'tool_use') {
+    const edited = editedPathOf(part);
+    if (edited) filesChanged.add(edited);
+  }
+
+  // The last assistant message is the summary; there is no `summary` field
+  // anywhere in the stream. A chatty model emits several, and the last one is
+  // the one that describes the finished work.
+  if (event.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
+    summary = part.text.trim();
+  }
 }
 
 if (!summary) {
