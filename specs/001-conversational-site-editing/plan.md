@@ -9,8 +9,9 @@
 A single-tenant web application, installed once per client website, that turns a plain-language
 chat request into a reviewed change on that site. Each request runs an autonomous coding agent
 in a throwaway container against a working copy of the site's repository. The container holds no
-credentials and has no git remote, so it can only commit locally; the worker then validates the
-resulting diff against the site's declared policy before pushing anything. A pushed branch
+credentials, has no git remote, and does not run git at all: it edits files and exits. The
+worker gates the resulting working-tree change against the site's declared policy, and only then
+stages, commits, and pushes. A pushed branch
 becomes a pull request, the hosting provider builds a preview, and the client approves to merge
 and publish, or undoes by reverting.
 
@@ -58,7 +59,7 @@ day. Roughly 40 source files, two end-to-end journeys, one container image.
 |---|---|---|
 | I. The Client Never Sees Code | Client surfaces render the durable summary and preview only. Raw diffs, paths, and build logs are confined to the failure detail supplied to the agent, never to client-facing views. | Pass |
 | II. Nothing Reaches Production Without Explicit Human Approval | Merge occurs only from the approval route handler, which requires an authenticated client identity. No scheduled or agent-initiated merge path exists in the design. | Pass |
-| III. Policy Gate Machine-Enforced | The container has no remote and no credential; push is a worker capability that runs after the diff gate. The gate is a pure function over a file list, unit-testable without any network. | Pass |
+| III. Policy Gate Machine-Enforced | The container has no remote, no credential, and no git; committing and pushing are worker capabilities that run only after the gate. The gate is a pure function over a file list, unit-testable without any network. | Pass |
 | IV. Test-First | The gate, the lock, the state machine, and the auth path are specified as pure modules with fixture-driven tests; tasks are ordered test-first. | Pass |
 | V. Observability and Cost Accountability | Every finished request writes a durable comment carrying stages, outcome, extent of change, and cost. Live output is explicitly ephemeral. | Pass |
 | VI. One Installation, One Website | Configuration names exactly one repository and one site; there is no collection of sites anywhere in the design. | Pass |
@@ -119,7 +120,7 @@ src/
 
 agent/
 ├── Dockerfile           # node + git + opencode
-└── entrypoint.sh        # Reads prompt, runs opencode, commits locally, exits
+└── entrypoint.sh        # Reads /control/prompt.json, runs opencode, edits /work, exits
 
 tests/
 ├── unit/                # policy gate, record parsing, state machine, config validation
@@ -144,10 +145,10 @@ overlaps two processes must not produce two agents on one branch.
 message
   └─ acquire refs/webagent/lock            (422 → refused, not queued)
      └─ working tree from bare mirror, branch from default or existing conversation branch
-        └─ container: opencode run --format json --auto   (no remote, no credentials)
-           └─ policy gate over changed paths and change size
-              ├─ violation → discard tree, release lock, blocked message
-              └─ pass → push branch, open or update pull request
+        └─ container: opencode run --format json --auto   (edits only, no git, no credentials)
+           └─ policy gate over the working tree's changed paths and change size
+              ├─ violation → delete tree, release lock, blocked message (nothing was committed)
+              └─ pass → stage permitted paths, commit, push branch, open or update pull request
                  └─ Netlify webhook → preview ready or build failed
                     └─ durable comment written, lock released, notification sent
 ```

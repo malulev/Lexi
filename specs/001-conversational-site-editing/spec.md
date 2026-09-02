@@ -17,6 +17,7 @@
 - Q: Where does the sites-and-permitted-users configuration live, and how is it edited? (OD-001) → A: The question dissolves: the product is installed once per website, the way a self-hosted content system is. A developer installs and configures it for one client site; there is no multi-site administration and no tenancy.
 - Q: How does the person with configuration privileges authenticate? → A: A passkey, or a password with a second factor. This credential can change a live website, so a single password is insufficient.
 - Q: Where do post-install settings live — permitted sign-ins, cost ceiling, alert contact? (OD-006) → A: In the site's own repository alongside the declared policy and agent guidance, with secrets remaining in deployment configuration. The agent is forbidden from editing that location.
+- Q: Is a preview required to be access-controlled, or only separate from the public site? (FR-021) → A: Separate and unlisted is sufficient. The hosting provider's preview builds are reachable by anyone holding the link; access protection is an optional installation upgrade, not a product requirement.
 - Q: Which conditions should trigger reconsidering the no-database decision? (OD-005) → A: None during the minimum viable product. It ships with no datastore. A requirement that appears to need one is dropped from scope rather than met by adding storage, and the decision is revisited only after the loop is proven.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -324,8 +325,10 @@ with the conversation still usable.
 
 **Preview**
 
-- **FR-021**: System MUST produce a private preview of the pending change, isolated from
-  the public website.
+- **FR-021**: System MUST produce a preview of the pending change at an unlisted address,
+  separate from the public website, such that the public website is unaffected by it.
+  The preview address is unguessable but not access-controlled; where the hosting provider
+  offers access protection for previews, an installation MAY enable it.
 - **FR-022**: System MUST show the preview inside the dashboard and MUST allow the client
   to view it at desktop and mobile widths and to interact with it.
 - **FR-023**: System MUST report preview build failures to the conversation in plain
@@ -364,7 +367,10 @@ with the conversation still usable.
 - **FR-034**: System MUST ensure that a failure at any stage leaves the public website
   unchanged and leaves no partially applied change in the site's repository.
 - **FR-035**: System MUST ask a clarifying question in the conversation, rather than
-  guessing, when a request is too ambiguous to implement safely.
+  guessing, when a request is too ambiguous to implement safely. **Deferred** beyond this
+  phase by decision (OD-007); until it lands, an ambiguous request produces an ordinary
+  attempt that the client corrects in conversation. Recorded rather than dropped so the gap
+  stays visible.
 
 ### Key Entities
 
@@ -461,6 +467,11 @@ than duplicated.
   clients and are the trigger conditions for revisiting the decision.
 - Conversation history recorded against a site's repository is visible to anyone with
   access to that repository — in practice, the site's own developer.
+- Because the permitted sign-in addresses live in the site's repository, write access to that
+  repository is equivalent to the ability to grant access to the editing interface. This is
+  accepted: the parties with repository write access are the site's own developers.
+- Preview addresses are unlisted rather than access-controlled. Anyone holding a preview link
+  can view the pending change.
 
 ## Open Decisions
 
@@ -481,6 +492,11 @@ Deliberately unresolved here; to be settled during planning, not by assumption.
   created exclusive marker held in the site's repository, valid across processes, with a
   staleness timeout. See FR-007a through FR-007c.
 - **OD-004**: How email notification is made idempotent without a delivery record.
+  Resolved in planning — see the durable record contract — and left here for traceability.
+- **OD-007**: How the agent signals that a request is too ambiguous to implement, so that
+  FR-035 can be satisfied. Deferred by decision to a phase after the loop is proven; until
+  then an ambiguous request produces an ordinary attempt, and the client corrects it in
+  conversation.
   Deliberately deferred to planning: low impact, and constrained enough by the no-datastore
   decision that the options are few.
 - ~~**OD-005**~~: Resolved 2026-09-02 — the minimum viable product ships with no

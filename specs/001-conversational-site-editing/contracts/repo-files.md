@@ -66,31 +66,39 @@ may not edit it.
 | Channel | Contents |
 |---|---|
 | Mount `/work` | Working tree at the conversation's branch. **No git remote configured.** |
-| `/work/.webagent-prompt.json` | `{ request, history[], guidance, targetHint? }` |
+| Mount `/control` | Separate from the repository tree. Holds `prompt.json`: `{ request, history[], guidance, targetHint? }` |
 | Environment | `OPENROUTER_API_KEY`, `MODEL` |
 
-The container receives no GitHub token, no Netlify token, and no git remote. Pushing is not
-forbidden; it is impossible.
+The container receives no GitHub token, no Netlify token, and no git remote.
+
+Control files live at `/control`, never inside `/work`, so they cannot become part of a change
+to the client's site no matter what the agent does with the working tree.
 
 ## Behaviour
 
-Runs `opencode run --model "$MODEL" --format json --auto "<prompt>"`, commits to the current
-branch locally, exits 0. Exits non-zero on failure. Killed at `maxRequestMinutes`.
+Runs `opencode run --model "$MODEL" --format json --auto "<prompt>"`, **edits files in `/work`
+and nothing else**, exits 0. Exits non-zero on failure. Killed at `maxRequestMinutes`.
+
+**The container does not run git.** It does not commit, does not branch, and need not have git
+installed. Committing is the host's job, after the gate has passed.
 
 ## Outputs
 
 | Channel | Contents |
 |---|---|
 | stdout | OpenCode JSON events, one per line — streamed as progress |
-| `/work` | Local commits, inspected by the worker after exit |
-| `/work/.webagent-result.json` | `{ summary, filesChanged[], tokensIn, tokensOut, costUsd }` |
+| `/work` | Modified, added, and deleted files — the uncommitted change set |
+| `/control/result.json` | `{ summary, filesChanged[], tokensIn, tokensOut, costUsd }` |
 
-`.webagent-prompt.json` and `.webagent-result.json` are removed before the diff is gated; they
-must never appear in a commit.
+The host derives the change set from the working tree's status, which includes untracked
+additions and deletions, gates it, and only then stages the permitted paths and commits with an
+author and message it controls.
 
 ## Non-negotiable properties
 
 - No credential capable of writing to the repository or hosting (FR-015).
+- No git remote, and no commit authored inside the container. A blocked change is discarded by
+  deleting the working tree, because no commit was ever made.
 - Outbound network restricted to the model provider where the environment permits; the absence
   of credentials is the enforced boundary, network restriction is defence in depth.
 - Destroyed after every request, successful or not.

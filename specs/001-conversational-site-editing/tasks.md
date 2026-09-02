@@ -103,10 +103,12 @@ image under `agent/`. Per plan.md Structure Decision.
 
 - [ ] T038 [P] Write failing tests in `tests/unit/runner/contract.test.ts` against a fake runner covering `start`, `logs`, `cancel`, and timeout kill
 - [ ] T039 Define the `JobRunner` interface and a fake implementation in `src/lib/runner/index.ts` and `src/lib/runner/fake.ts`
-- [ ] T040 Implement the Docker runner in `src/lib/runner/docker.ts` using dockerode: mount the working tree, pass only `OPENROUTER_API_KEY` and `MODEL`, stream stdout, enforce the timeout, always destroy the container
-- [ ] T041 [P] Write the agent image in `agent/Dockerfile` with node, git, and opencode pinned to explicit versions
-- [ ] T042 Write `agent/entrypoint.sh`: read `/work/.webagent-prompt.json`, run `opencode run --model "$MODEL" --format json --auto`, commit locally, write `/work/.webagent-result.json`, exit
-- [ ] T043 [P] Write a failing test in `tests/unit/runner/isolation.test.ts` asserting the container receives no GitHub or Netlify credential and that the working tree has no configured git remote (FR-015)
+- [ ] T040 Implement the Docker runner in `src/lib/runner/docker.ts` using dockerode: mount the working tree at `/work` and the control directory at `/control`, pass only `OPENROUTER_API_KEY` and `MODEL`, stream stdout, enforce the timeout, always destroy the container
+- [ ] T041 [P] Write the agent image in `agent/Dockerfile` with node and opencode pinned to explicit versions — **no git**, since the container never commits
+- [ ] T042 Write `agent/entrypoint.sh`: read `/control/prompt.json`, run `opencode run --model "$MODEL" --format json --auto`, edit files under `/work` only, write `/control/result.json`, exit
+- [ ] T043 [P] Write a failing test in `tests/unit/runner/isolation.test.ts` asserting the container receives no GitHub or Netlify credential, that the working tree has no configured git remote, and that no control file is reachable from inside `/work` (FR-015)
+- [ ] T043a [P] Write a failing test in `tests/unit/mirror/changeset.test.ts` asserting the change set derived from the working tree includes untracked additions and deletions, not only tracked modifications
+- [ ] T043b Implement working-tree change-set derivation and controlled commit in `src/lib/mirror/changeset.ts`: gate first, then stage exactly the permitted paths and commit with an author and message the host controls
 
 ### Progress plumbing
 
@@ -130,6 +132,7 @@ conversation showing the requested change while the public site is unchanged.
 ### Tests
 
 - [ ] T048 [P] [US1] Write failing integration tests in `tests/integration/conversations.test.ts` for creating a conversation, posting a message, and receiving `409` when a request is already in flight (FR-007b)
+- [ ] T048a [P] [US1] Write a failing integration test in the same file asserting a follow-up message commits to the **same** branch and pull request, refreshing the existing preview rather than opening a competing one (FR-006, US1 acceptance 5)
 - [ ] T049 [P] [US1] Write failing integration tests in `tests/integration/stream.test.ts` asserting stage events are emitted in order and that reconnection replays durable records before resuming live output
 - [ ] T050 [P] [US1] Write failing integration tests in `tests/integration/netlify-webhook.test.ts` covering correlation by pull request number, fallback to commit reference, an uncorrelatable deploy being ignored, and repeated delivery of the same event being idempotent
 
@@ -138,7 +141,7 @@ conversation showing the requested change while the public site is unchanged.
 - [ ] T051 [US1] Implement the Netlify client in `src/lib/netlify/client.ts`: fetch deploys for the site, find by pull request number and by commit reference
 - [ ] T052 [US1] Implement webhook payload parsing and signature verification in `src/lib/netlify/webhook.ts`, tolerating unknown fields (R4 assumption)
 - [ ] T053 [US1] Implement prompt assembly in `src/lib/jobs/prompt.ts`: current request, conversation history from records, `AGENTS.md` guidance, optional page hint
-- [ ] T054 [US1] Implement the orchestrator in `src/lib/jobs/run.ts`: acquire lock, build working tree, run container, gate the diff, push, open or update the pull request, await preview, write the record, release the lock — releasing on every path including failure
+- [ ] T054 [US1] Implement the orchestrator in `src/lib/jobs/run.ts`: acquire lock, build working tree, run container, derive the change set, gate it, stage and commit, push, open or update the pull request, await preview, write the record, release the lock — releasing on every path including failure. A blocked change is discarded by deleting the working tree; nothing was committed
 - [ ] T055 [US1] Implement `POST /api/conversations` in `src/app/api/conversations/route.ts` creating branch `webagent/c-<number>`, opening a pull request, and starting a request
 - [ ] T056 [US1] Implement `GET /api/conversations` in the same file, assembling the list from pull requests
 - [ ] T057 [US1] Implement `GET /api/conversations/[number]` in `src/app/api/conversations/[number]/route.ts`, assembling history by parsing comments (FR-009b)
@@ -173,6 +176,7 @@ is written to the repository and the client sees a clear blocked message.
 ### Implementation
 
 - [ ] T069 [US3] Wire site-declared policy loading into the orchestrator in `src/lib/jobs/run.ts`, discarding the working tree on violation
+- [ ] T069a [P] [US3] Write a failing test in `tests/integration/policy-block.test.ts` asserting that no control file and no agent scratch file appears in any commit, whatever the agent leaves in the working tree
 - [ ] T070 [US3] Implement blocked-outcome rendering in `src/lib/record/record.ts` carrying `violation` and `blockedPath`
 - [ ] T071 [US3] Map violations to client-facing language in `src/lib/jobs/messages.ts` per the error vocabulary in contracts/http-api.md
 - [ ] T072 [P] [US3] Inject `AGENTS.md` guidance into the prompt in `src/lib/jobs/prompt.ts` (FR-020)
@@ -251,10 +255,12 @@ confirm three distinct plain-language messages and a still-usable conversation.
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T094 [P] Write the end-to-end journey `tests/e2e/request-to-preview.spec.ts` against a fixture site
+- [ ] T094 [P] Write the end-to-end journey `tests/e2e/request-to-preview.spec.ts` against a fixture site, asserting the production URL is unchanged once the preview is ready (FR-024)
 - [ ] T095 [P] Write the end-to-end journey `tests/e2e/approve-and-undo.spec.ts`
-- [ ] T096 [P] Add a stage-timing check to `tests/e2e/request-to-preview.spec.ts` asserting first feedback within 10 seconds and a stage update within 60 (SC-003)
+- [ ] T096 [P] Add timing assertions to the end-to-end journeys: first feedback within 10 seconds and a stage update within 60 (SC-003), request to preview within 4 minutes (SC-002), and undo complete within 3 minutes (SC-007)
 - [ ] T097 [P] Audit every client-facing string against Principle I in `tests/unit/messages.test.ts`, asserting no file paths, diffs, or build logs appear in the vocabulary
+- [ ] T097a [P] Write a test in `tests/unit/config/secrets.test.ts` asserting the settings schema accepts no secret-shaped field, so a secret committed to the site's repository is rejected rather than honoured (FR-003d)
+- [ ] T097b [P] Add a quickstart validation step confirming the approval and undo are visible in the pull request timeline and git history after publishing (FR-031)
 - [ ] T098 Confirm the gate module imports neither `dockerode` nor any network client, enforced by a lint rule in `eslint.config.mjs`
 - [ ] T099 [P] Record a real Netlify deploy payload into `tests/fixtures/netlify/` and reconcile the correlation fields with R4's assumption
 - [ ] T100 Walk quickstart.md end to end on a clean host and correct any step that does not work verbatim
