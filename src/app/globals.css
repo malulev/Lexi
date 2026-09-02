@@ -9,6 +9,7 @@
   --surface: #f6f7f9;
   --danger: #b23a3a;
   --ok: #2f7d4f;
+  --radius: 10px;
 }
 
 @media (prefers-color-scheme: dark) {

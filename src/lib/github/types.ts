@@ -61,6 +61,16 @@ export interface RepoClient {
   /** Creates a commit with no parent tree change, used to anchor the lock ref. */
   createLockCommit(message: string, parentSha: string): Promise<string>;
 
+  /**
+   * The message of a commit, or `null` when there is none to read.
+   *
+   * This exists for one reason: the lock ref points at a commit whose message
+   * names the request holding it, and a process breaking a stale lock has no
+   * other way to learn whose request it is ending. Without this, an abandoned
+   * request is recorded anonymously, which is a worse history than none.
+   */
+  getCommitMessage(sha: string): Promise<string | null>;
+
   createPullRequest(input: {
     title: string;
     head: string;

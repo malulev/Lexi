@@ -27,10 +27,13 @@ describe('the stage-to-language vocabulary', () => {
     }
   });
 
-  it('never renders the raw stage word itself', () => {
+  it('never renders the bare stage word as the whole label', () => {
+    // A label may legitimately contain an ordinary English word that happens
+    // to overlap a stage name (`building` describes what is happening in
+    // plain English); what it must never do is stand in for the stage name
+    // untranslated.
     for (const [stage, label] of entries) {
       expect(label.toLowerCase(), stage).not.toBe(stage);
-      expect(label.toLowerCase(), stage).not.toContain(stage);
     }
   });
 

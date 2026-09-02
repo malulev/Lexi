@@ -50,6 +50,7 @@ function createFakeRepoClient(files: Record<string, string | null>): RepoClient 
     deleteRef: notImplemented('deleteRef'),
     getRef: notImplemented('getRef') as () => Promise<RefInfo | null>,
     createLockCommit: notImplemented('createLockCommit'),
+    getCommitMessage: notImplemented('getCommitMessage'),
     createPullRequest: notImplemented('createPullRequest') as () => Promise<PullRequestInfo>,
     getPullRequest: notImplemented('getPullRequest') as () => Promise<PullRequestInfo | null>,
     listPullRequests: notImplemented('listPullRequests') as () => Promise<PullRequestInfo[]>,

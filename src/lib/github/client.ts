@@ -18,7 +18,20 @@ import { RefAlreadyExistsError } from './types';
  * conversation branches (`refs/heads/webagent/c-<n>`). `getDefaultBranch`
  * and `revertCommit`'s `branch` argument use the short branch name, matching
  * what the GitHub API itself returns for a repository's default branch.
+ *
+ * Each operation below is a standalone function over a `Ctx`, rather than a
+ * closure captured inside `createRepoClient`, so that no one function grows
+ * to hold the whole client's surface.
  */
+
+interface Ctx {
+  octokit: Octokit;
+  owner: string;
+  repo: string;
+  repoSlug: string;
+  /** Fetched fresh per call: `TokenMinter` caches internally, this never does. */
+  authHeaders: () => Promise<{ authorization: string }>;
+}
 
 function stripRefsPrefix(ref: string): string {
   return ref.replace(/^refs\//, '');
@@ -94,314 +107,290 @@ function toCommentInfo(data: {
   };
 }
 
-export function createRepoClient(
-  env: Env,
-  deps?: { minter?: TokenMinter; fetch?: typeof fetch },
-): RepoClient {
-  const owner = env.githubRepoOwner;
-  const repo = env.githubRepoName;
-  const repoSlug = `${owner}/${repo}`;
+async function readFile(ctx: Ctx, path: string, ref?: string): Promise<string | null> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref, headers });
+    if (Array.isArray(data) || data.type !== 'file' || typeof data.content !== 'string') {
+      throw new Error(`path is not a file: ${path}`);
+    }
+    return Buffer.from(data.content, 'base64').toString('utf-8');
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw describeError(`read file ${path}`, repoSlug, error);
+  }
+}
+
+async function getDefaultBranch(ctx: Ctx): Promise<string> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.repos.get({ owner, repo, headers });
+    return data.default_branch;
+  } catch (error) {
+    throw describeError('get default branch', repoSlug, error);
+  }
+}
+
+async function createRef(ctx: Ctx, ref: string, sha: string): Promise<void> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    await octokit.rest.git.createRef({ owner, repo, ref, sha, headers });
+  } catch (error) {
+    if (isRefAlreadyExists(error)) throw new RefAlreadyExistsError(ref);
+    throw describeError(`create ref ${ref}`, repoSlug, error);
+  }
+}
+
+async function deleteRef(ctx: Ctx, ref: string): Promise<void> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    await octokit.rest.git.deleteRef({ owner, repo, ref: stripRefsPrefix(ref), headers });
+  } catch (error) {
+    // Release must be idempotent: a ref already gone is not a failure.
+    if (isNotFound(error)) return;
+    throw describeError(`delete ref ${ref}`, repoSlug, error);
+  }
+}
+
+async function getRef(ctx: Ctx, ref: string): Promise<RefInfo | null> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.git.getRef({ owner, repo, ref: stripRefsPrefix(ref), headers });
+    const sha = data.object.sha;
+    const commit = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
+    return { ref: data.ref, sha, committedAt: commit.data.committer.date };
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw describeError(`get ref ${ref}`, repoSlug, error);
+  }
+}
+
+async function createLockCommit(ctx: Ctx, message: string, parentSha: string): Promise<string> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const parent = await octokit.rest.git.getCommit({ owner, repo, commit_sha: parentSha, headers });
+    const created = await octokit.rest.git.createCommit({
+      owner,
+      repo,
+      message,
+      tree: parent.data.tree.sha,
+      parents: [parentSha],
+      headers,
+    });
+    return created.data.sha;
+  } catch (error) {
+    throw describeError(`create anchor commit on ${parentSha}`, repoSlug, error);
+  }
+}
+
+/**
+ * Reads a commit's message back.
+ *
+ * Used only by the lock, whose ref points at a commit naming the request that
+ * holds it. It is the one way a process breaking a stale lock can learn whose
+ * request it is ending, and so the one way an abandoned request gets recorded
+ * under its own identity rather than anonymously.
+ */
+async function getCommitMessage(ctx: Ctx, sha: string): Promise<string | null> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
+    return data.message;
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw describeError(`read the message of commit ${sha}`, repoSlug, error);
+  }
+}
+
+async function createPullRequest(
+  ctx: Ctx,
+  input: { title: string; head: string; base: string; body: string },
+): Promise<PullRequestInfo> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.pulls.create({ owner, repo, ...input, headers });
+    return toPullRequestInfo(data);
+  } catch (error) {
+    throw describeError(`create pull request from ${input.head}`, repoSlug, error);
+  }
+}
+
+async function getPullRequest(ctx: Ctx, number: number): Promise<PullRequestInfo | null> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: number, headers });
+    return toPullRequestInfo(data);
+  } catch (error) {
+    if (isNotFound(error)) return null;
+    throw describeError(`get pull request #${number}`, repoSlug, error);
+  }
+}
+
+async function listPullRequests(ctx: Ctx): Promise<PullRequestInfo[]> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'all', per_page: 100, headers });
+    return data.map(toPullRequestInfo);
+  } catch (error) {
+    throw describeError('list pull requests', repoSlug, error);
+  }
+}
+
+async function updatePullRequest(
+  ctx: Ctx,
+  number: number,
+  input: { title?: string; body?: string; state?: 'open' | 'closed' },
+): Promise<PullRequestInfo> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.pulls.update({ owner, repo, pull_number: number, ...input, headers });
+    return toPullRequestInfo(data);
+  } catch (error) {
+    throw describeError(`update pull request #${number}`, repoSlug, error);
+  }
+}
+
+async function listComments(ctx: Ctx, number: number): Promise<CommentInfo[]> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    // Ascending by creation time is the API default: creation order, as required.
+    const { data } = await octokit.rest.issues.listComments({ owner, repo, issue_number: number, headers });
+    return data.map(toCommentInfo);
+  } catch (error) {
+    throw describeError(`list comments on #${number}`, repoSlug, error);
+  }
+}
+
+async function createComment(ctx: Ctx, number: number, body: string): Promise<CommentInfo> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: number, body, headers });
+    return toCommentInfo(data);
+  } catch (error) {
+    throw describeError(`create comment on #${number}`, repoSlug, error);
+  }
+}
+
+async function updateComment(ctx: Ctx, commentId: number, body: string): Promise<CommentInfo> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.issues.updateComment({ owner, repo, comment_id: commentId, body, headers });
+    return toCommentInfo(data);
+  } catch (error) {
+    throw describeError(`update comment ${commentId}`, repoSlug, error);
+  }
+}
+
+async function mergePullRequest(ctx: Ctx, number: number): Promise<{ sha: string }> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.pulls.merge({ owner, repo, pull_number: number, headers });
+    return { sha: data.sha };
+  } catch (error) {
+    throw describeError(`merge pull request #${number}`, repoSlug, error);
+  }
+}
+
+/**
+ * Reverts a merge commit by giving the branch a new commit whose tree is the
+ * merge's first parent's tree (the tree the branch had immediately before
+ * the merge) — the same construction `git revert -m 1` performs.
+ *
+ * This is exact when `branch`'s tip is still that merge commit. If other
+ * commits have landed on `branch` since, this recreates the pre-merge tree
+ * wholesale rather than three-way-merging the inverse patch onto the new
+ * tip, which can discard unrelated later changes. A fully general revert
+ * needs a real merge algorithm over a working tree (git itself), which the
+ * Git Data API does not provide. Acceptable at this project's scale
+ * (FR-029, R5) and called out here rather than silently assumed correct.
+ */
+async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sha: string }> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  const refPath = `heads/${branch}`;
+  try {
+    const headers = await ctx.authHeaders();
+    const merge = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
+    const mainlineParentSha = merge.data.parents[0]?.sha;
+    if (!mainlineParentSha) {
+      throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
+    }
+    const mainlineParent = await octokit.rest.git.getCommit({
+      owner,
+      repo,
+      commit_sha: mainlineParentSha,
+      headers,
+    });
+    const currentTip = await octokit.rest.git.getRef({ owner, repo, ref: refPath, headers });
+    const created = await octokit.rest.git.createCommit({
+      owner,
+      repo,
+      message: `Revert changes introduced by ${sha}`,
+      tree: mainlineParent.data.tree.sha,
+      parents: [currentTip.data.object.sha],
+      headers,
+    });
+    await octokit.rest.git.updateRef({ owner, repo, ref: refPath, sha: created.data.sha, headers });
+    return { sha: created.data.sha };
+  } catch (error) {
+    throw describeError(`revert commit ${sha} on ${branch}`, repoSlug, error);
+  }
+}
+
+/**
+ * A credential, not a document. Callers must not log or persist the
+ * returned value; it exists to be handed to a local `git push` and nothing
+ * else. It never reaches the agent container (FR-015).
+ */
+async function authenticatedRemoteUrl(ctx: Ctx, minter: TokenMinter): Promise<string> {
+  const token = await minter.getToken();
+  return `https://x-access-token:${token}@github.com/${ctx.owner}/${ctx.repo}.git`;
+}
+
+export function createRepoClient(env: Env, deps?: { minter?: TokenMinter; fetch?: typeof fetch }): RepoClient {
   const minter = deps?.minter ?? createTokenMinter(env);
-  // Retries are disabled: this client throws promptly and lets the caller
-  // (the worker, the lock) decide whether and when to try again. Automatic
-  // retry-with-backoff would also make a transient-failure test slow.
-  const octokit = new Octokit({
-    request: { fetch: deps?.fetch ?? fetch },
-    retry: { enabled: false },
-  });
-
-  /** Fetched fresh per call: `TokenMinter` caches internally, this never does. */
-  async function authHeaders(): Promise<{ authorization: string }> {
-    const token = await minter.getToken();
-    return { authorization: `token ${token}` };
-  }
-
-  async function readFile(path: string, ref?: string): Promise<string | null> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref, headers });
-      if (Array.isArray(data) || data.type !== 'file' || typeof data.content !== 'string') {
-        throw new Error(`path is not a file: ${path}`);
-      }
-      return Buffer.from(data.content, 'base64').toString('utf-8');
-    } catch (error) {
-      if (isNotFound(error)) return null;
-      throw describeError(`read file ${path}`, repoSlug, error);
-    }
-  }
-
-  async function getDefaultBranch(): Promise<string> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.repos.get({ owner, repo, headers });
-      return data.default_branch;
-    } catch (error) {
-      throw describeError('get default branch', repoSlug, error);
-    }
-  }
-
-  async function createRef(ref: string, sha: string): Promise<void> {
-    try {
-      const headers = await authHeaders();
-      await octokit.rest.git.createRef({ owner, repo, ref, sha, headers });
-    } catch (error) {
-      if (isRefAlreadyExists(error)) throw new RefAlreadyExistsError(ref);
-      throw describeError(`create ref ${ref}`, repoSlug, error);
-    }
-  }
-
-  async function deleteRef(ref: string): Promise<void> {
-    try {
-      const headers = await authHeaders();
-      await octokit.rest.git.deleteRef({ owner, repo, ref: stripRefsPrefix(ref), headers });
-    } catch (error) {
-      // Release must be idempotent: a ref already gone is not a failure.
-      if (isNotFound(error)) return;
-      throw describeError(`delete ref ${ref}`, repoSlug, error);
-    }
-  }
-
-  async function getRef(ref: string): Promise<RefInfo | null> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.git.getRef({
-        owner,
-        repo,
-        ref: stripRefsPrefix(ref),
-        headers,
-      });
-      const sha = data.object.sha;
-      const commit = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
-      return { ref: data.ref, sha, committedAt: commit.data.committer.date };
-    } catch (error) {
-      if (isNotFound(error)) return null;
-      throw describeError(`get ref ${ref}`, repoSlug, error);
-    }
-  }
-
-  async function createLockCommit(message: string, parentSha: string): Promise<string> {
-    try {
-      const headers = await authHeaders();
-      const parent = await octokit.rest.git.getCommit({
-        owner,
-        repo,
-        commit_sha: parentSha,
-        headers,
-      });
-      const created = await octokit.rest.git.createCommit({
-        owner,
-        repo,
-        message,
-        tree: parent.data.tree.sha,
-        parents: [parentSha],
-        headers,
-      });
-      return created.data.sha;
-    } catch (error) {
-      throw describeError(`create anchor commit on ${parentSha}`, repoSlug, error);
-    }
-  }
-
-  async function createPullRequest(input: {
-    title: string;
-    head: string;
-    base: string;
-    body: string;
-  }): Promise<PullRequestInfo> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.create({ owner, repo, ...input, headers });
-      return toPullRequestInfo(data);
-    } catch (error) {
-      throw describeError(`create pull request from ${input.head}`, repoSlug, error);
-    }
-  }
-
-  async function getPullRequest(number: number): Promise<PullRequestInfo | null> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: number, headers });
-      return toPullRequestInfo(data);
-    } catch (error) {
-      if (isNotFound(error)) return null;
-      throw describeError(`get pull request #${number}`, repoSlug, error);
-    }
-  }
-
-  async function listPullRequests(): Promise<PullRequestInfo[]> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.list({
-        owner,
-        repo,
-        state: 'all',
-        per_page: 100,
-        headers,
-      });
-      return data.map(toPullRequestInfo);
-    } catch (error) {
-      throw describeError('list pull requests', repoSlug, error);
-    }
-  }
-
-  async function updatePullRequest(
-    number: number,
-    input: { title?: string; body?: string; state?: 'open' | 'closed' },
-  ): Promise<PullRequestInfo> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.update({
-        owner,
-        repo,
-        pull_number: number,
-        ...input,
-        headers,
-      });
-      return toPullRequestInfo(data);
-    } catch (error) {
-      throw describeError(`update pull request #${number}`, repoSlug, error);
-    }
-  }
-
-  async function listComments(number: number): Promise<CommentInfo[]> {
-    try {
-      const headers = await authHeaders();
-      // Ascending by creation time is the API default: creation order, as required.
-      const { data } = await octokit.rest.issues.listComments({
-        owner,
-        repo,
-        issue_number: number,
-        headers,
-      });
-      return data.map(toCommentInfo);
-    } catch (error) {
-      throw describeError(`list comments on #${number}`, repoSlug, error);
-    }
-  }
-
-  async function createComment(number: number, body: string): Promise<CommentInfo> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.issues.createComment({
-        owner,
-        repo,
-        issue_number: number,
-        body,
-        headers,
-      });
-      return toCommentInfo(data);
-    } catch (error) {
-      throw describeError(`create comment on #${number}`, repoSlug, error);
-    }
-  }
-
-  async function updateComment(commentId: number, body: string): Promise<CommentInfo> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.issues.updateComment({
-        owner,
-        repo,
-        comment_id: commentId,
-        body,
-        headers,
-      });
-      return toCommentInfo(data);
-    } catch (error) {
-      throw describeError(`update comment ${commentId}`, repoSlug, error);
-    }
-  }
-
-  async function mergePullRequest(number: number): Promise<{ sha: string }> {
-    try {
-      const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.merge({
-        owner,
-        repo,
-        pull_number: number,
-        headers,
-      });
-      return { sha: data.sha };
-    } catch (error) {
-      throw describeError(`merge pull request #${number}`, repoSlug, error);
-    }
-  }
-
-  /**
-   * Reverts a merge commit by giving the branch a new commit whose tree is
-   * the merge's first parent's tree (the tree the branch had immediately
-   * before the merge) — the same construction `git revert -m 1` performs.
-   *
-   * This is exact when `branch`'s tip is still that merge commit. If other
-   * commits have landed on `branch` since, this recreates the pre-merge tree
-   * wholesale rather than three-way-merging the inverse patch onto the new
-   * tip, which can discard unrelated later changes. A fully general revert
-   * needs a real merge algorithm over a working tree (git itself), which the
-   * Git Data API does not provide. Acceptable at this project's scale
-   * (FR-029, R5) and called out here rather than silently assumed correct.
-   */
-  async function revertCommit(sha: string, branch: string): Promise<{ sha: string }> {
-    const refPath = `heads/${branch}`;
-    try {
-      const headers = await authHeaders();
-      const merge = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
-      const mainlineParentSha = merge.data.parents[0]?.sha;
-      if (!mainlineParentSha) {
-        throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
-      }
-      const mainlineParent = await octokit.rest.git.getCommit({
-        owner,
-        repo,
-        commit_sha: mainlineParentSha,
-        headers,
-      });
-      const currentTip = await octokit.rest.git.getRef({ owner, repo, ref: refPath, headers });
-      const created = await octokit.rest.git.createCommit({
-        owner,
-        repo,
-        message: `Revert changes introduced by ${sha}`,
-        tree: mainlineParent.data.tree.sha,
-        parents: [currentTip.data.object.sha],
-        headers,
-      });
-      await octokit.rest.git.updateRef({
-        owner,
-        repo,
-        ref: refPath,
-        sha: created.data.sha,
-        headers,
-      });
-      return { sha: created.data.sha };
-    } catch (error) {
-      throw describeError(`revert commit ${sha} on ${branch}`, repoSlug, error);
-    }
-  }
-
-  /**
-   * A credential, not a document. Callers must not log or persist the
-   * returned value; it exists to be handed to a local `git push` and nothing
-   * else. It never reaches the agent container (FR-015).
-   */
-  async function authenticatedRemoteUrl(): Promise<string> {
-    const token = await minter.getToken();
-    return `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
-  }
+  const ctx: Ctx = {
+    owner: env.githubRepoOwner,
+    repo: env.githubRepoName,
+    repoSlug: `${env.githubRepoOwner}/${env.githubRepoName}`,
+    // Retries are disabled: this client throws promptly and lets the caller
+    // (the worker, the lock) decide whether and when to try again. Automatic
+    // retry-with-backoff would also make a transient-failure test slow.
+    octokit: new Octokit({ request: { fetch: deps?.fetch ?? fetch }, retry: { enabled: false } }),
+    authHeaders: async () => ({ authorization: `token ${await minter.getToken()}` }),
+  };
 
   return {
-    readFile,
-    getDefaultBranch,
-    createRef,
-    deleteRef,
-    getRef,
-    createLockCommit,
-    createPullRequest,
-    getPullRequest,
-    listPullRequests,
-    updatePullRequest,
-    listComments,
-    createComment,
-    updateComment,
-    mergePullRequest,
-    revertCommit,
-    authenticatedRemoteUrl,
+    readFile: (path, ref) => readFile(ctx, path, ref),
+    getDefaultBranch: () => getDefaultBranch(ctx),
+    createRef: (ref, sha) => createRef(ctx, ref, sha),
+    deleteRef: (ref) => deleteRef(ctx, ref),
+    getRef: (ref) => getRef(ctx, ref),
+    createLockCommit: (message, parentSha) => createLockCommit(ctx, message, parentSha),
+    getCommitMessage: (sha) => getCommitMessage(ctx, sha),
+    createPullRequest: (input) => createPullRequest(ctx, input),
+    getPullRequest: (number) => getPullRequest(ctx, number),
+    listPullRequests: () => listPullRequests(ctx),
+    updatePullRequest: (number, input) => updatePullRequest(ctx, number, input),
+    listComments: (number) => listComments(ctx, number),
+    createComment: (number, body) => createComment(ctx, number, body),
+    updateComment: (commentId, body) => updateComment(ctx, commentId, body),
+    mergePullRequest: (number) => mergePullRequest(ctx, number),
+    revertCommit: (sha, branch) => revertCommit(ctx, sha, branch),
+    authenticatedRemoteUrl: () => authenticatedRemoteUrl(ctx, minter),
   };
 }

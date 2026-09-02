@@ -28,14 +28,31 @@ const MS_PER_MINUTE = 60_000;
 /**
  * Names the request and its start time in the lock commit's message, per
  * data-model.md's Lock entity ("identity: points at a commit whose message
- * names the request and its start time"). `RepoClient` has no method to read
- * a commit's message back — `getRef` returns only `{ref, sha, committedAt}`
- * — so `brokenRequestId` on a `broken_stale` result stays best-effort
- * (currently always `undefined`) until that capability exists. The message
- * is still written now so nothing is lost once it does.
+ * names the request and its start time").
+ *
+ * This is not decoration. It is the only channel by which a process breaking an
+ * abandoned lock can learn whose request it is ending, and so the only way that
+ * request's record gets written under its own identity rather than anonymously.
  */
 function buildLockMessage(requestId: string, startedAt: string): string {
-  return `webagent-lock: ${requestId} started ${startedAt}`;
+  return `${LOCK_MESSAGE_PREFIX}${requestId} started ${startedAt}`;
+}
+
+const LOCK_MESSAGE_PREFIX = 'webagent-lock: ';
+
+/** `undefined` when the message is absent or was not written by this product. */
+function parseLockMessage(message: string | null): string | undefined {
+  if (!message?.startsWith(LOCK_MESSAGE_PREFIX)) return undefined;
+  return message.slice(LOCK_MESSAGE_PREFIX.length).split(' started ')[0]?.trim() || undefined;
+}
+
+/** Best effort by design: a lock is still breakable when its message cannot be read. */
+async function readHolder(client: RepoClient, sha: string): Promise<string | undefined> {
+  try {
+    return parseLockMessage(await client.getCommitMessage(sha));
+  } catch {
+    return undefined;
+  }
 }
 
 function isStale(committedAt: string, maxRequestMinutes: number, now: Date): boolean {
@@ -77,7 +94,10 @@ async function breakStaleLock(
   requestId: string,
   startedAt: string,
   preparedLockSha: string,
+  staleSha: string,
 ): Promise<AcquireResult> {
+  // Read whose request this was before deleting the ref that names it.
+  const brokenRequestId = await readHolder(client, staleSha);
   await releaseRef(client, LOCK_REF);
 
   try {
@@ -93,7 +113,7 @@ async function breakStaleLock(
     ok: false,
     reason: 'broken_stale',
     handle: makeHandle(client, requestId, startedAt),
-    brokenRequestId: undefined,
+    ...(brokenRequestId ? { brokenRequestId } : {}),
   };
 }
 
@@ -119,7 +139,7 @@ async function resolveContestedAcquire(
     return { ok: false, reason: 'held', heldSince: existing.committedAt };
   }
 
-  return breakStaleLock(client, requestId, startedAt, preparedLockSha);
+  return breakStaleLock(client, requestId, startedAt, preparedLockSha, existing.sha);
 }
 
 export function createLock(client: RepoClient, deps?: { now?: () => Date }) {

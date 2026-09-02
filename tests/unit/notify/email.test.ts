@@ -41,6 +41,7 @@ function createFakeRepoClient(comments: CommentInfo[]): RepoClient {
     deleteRef: notImplemented('deleteRef') as RepoClient['deleteRef'],
     getRef: notImplemented('getRef') as () => Promise<RefInfo | null>,
     createLockCommit: notImplemented('createLockCommit') as RepoClient['createLockCommit'],
+    getCommitMessage: notImplemented('getCommitMessage') as RepoClient['getCommitMessage'],
     createPullRequest: notImplemented('createPullRequest') as () => Promise<PullRequestInfo>,
     getPullRequest: notImplemented('getPullRequest') as () => Promise<PullRequestInfo | null>,
     listPullRequests: notImplemented('listPullRequests') as () => Promise<PullRequestInfo[]>,

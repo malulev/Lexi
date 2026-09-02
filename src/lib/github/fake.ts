@@ -10,6 +10,9 @@ import { RefAlreadyExistsError } from './types';
  * `state` is exposed live, not copied, specifically so a test can reach in
  * and mutate it: ageing a lock ref's `committedAt` to exercise staleness is
  * the motivating example.
+ *
+ * As in `client.ts`, each operation is a standalone function over a small
+ * context rather than a closure holding the whole client's surface.
  */
 
 interface FakeCommit {
@@ -17,6 +20,8 @@ interface FakeCommit {
   tree: string;
   parents: string[];
   committedAt: string;
+  /** Read back by the lock, whose commit message names the request holding it. */
+  message?: string;
 }
 
 export interface FakeState {
@@ -35,233 +40,232 @@ export interface FakeRepoClientSeed {
   now?: () => Date;
 }
 
+interface Ctx {
+  state: FakeState;
+  nowIso: () => string;
+  counters: { nextPrNumber: number; nextCommentId: number; shaCounter: number };
+}
+
 function headsRef(branch: string): string {
   return `refs/heads/${branch}`;
 }
 
-function buildInitialState(
-  seed?: FakeRepoClientSeed,
-  genesisSha = 'fake-genesis-commit',
-): FakeState {
+function buildInitialState(seed: FakeRepoClientSeed | undefined, nowIso: () => string): FakeState {
   const defaultBranch = seed?.defaultBranch ?? 'main';
-  const now = (seed?.now ?? (() => new Date()))().toISOString();
-  const genesis: FakeCommit = {
-    sha: genesisSha,
-    tree: 'fake-genesis-tree',
-    parents: [],
-    committedAt: now,
-  };
+  const genesisSha = 'fake-genesis-commit';
+  const at = nowIso();
   return {
     defaultBranch,
     files: { ...(seed?.files ?? {}) },
-    refs: {
-      [headsRef(defaultBranch)]: {
-        ref: headsRef(defaultBranch),
-        sha: genesisSha,
-        committedAt: now,
-      },
-    },
-    commits: { [genesisSha]: genesis },
+    refs: { [headsRef(defaultBranch)]: { ref: headsRef(defaultBranch), sha: genesisSha, committedAt: at } },
+    commits: { [genesisSha]: { sha: genesisSha, tree: 'fake-genesis-tree', parents: [], committedAt: at } },
     pullRequests: [...(seed?.pullRequests ?? [])],
     comments: {},
   };
 }
 
-export function createFakeRepoClient(
-  seed?: FakeRepoClientSeed,
-): RepoClient & { readonly state: FakeState } {
-  const clock = seed?.now ?? (() => new Date());
-  const state = buildInitialState(seed);
-  let nextPrNumber = state.pullRequests.reduce((max, pr) => Math.max(max, pr.number), 0) + 1;
-  let nextCommentId = 5000;
-  let shaCounter = 0;
+function nextSha(ctx: Ctx): string {
+  return `fake-sha-${(ctx.counters.shaCounter += 1)}`;
+}
 
-  const nowIso = (): string => clock().toISOString();
-  const nextSha = (): string => `fake-sha-${(shaCounter += 1)}`;
+/** A commit referenced without prior seeding still resolves, so a test need not pre-populate every sha it hands the fake. */
+function ensureCommit(ctx: Ctx, sha: string): FakeCommit {
+  return (ctx.state.commits[sha] ??= {
+    sha,
+    tree: `fake-tree-for-${sha}`,
+    parents: [],
+    committedAt: ctx.nowIso(),
+  });
+}
 
-  /** A commit created or referenced without prior seeding still resolves, so a test need not pre-populate every sha it hands the fake. */
-  function ensureCommit(sha: string): FakeCommit {
-    return (state.commits[sha] ??= {
-      sha,
-      tree: `fake-tree-for-${sha}`,
-      parents: [],
-      committedAt: nowIso(),
-    });
-  }
+function requirePullRequest(ctx: Ctx, number: number): PullRequestInfo {
+  const pr = ctx.state.pullRequests.find((candidate) => candidate.number === number);
+  if (!pr) throw new Error(`no such pull request: #${number}`);
+  return pr;
+}
 
-  function requirePullRequest(number: number): PullRequestInfo {
-    const pr = state.pullRequests.find((candidate) => candidate.number === number);
-    if (!pr) throw new Error(`no such pull request: #${number}`);
-    return pr;
-  }
+async function readFile(ctx: Ctx, path: string, _ref?: string): Promise<string | null> {
+  return ctx.state.files[path] ?? null;
+}
 
-  async function readFile(path: string, _ref?: string): Promise<string | null> {
-    return state.files[path] ?? null;
-  }
+async function getDefaultBranch(ctx: Ctx): Promise<string> {
+  return ctx.state.defaultBranch;
+}
 
-  async function getDefaultBranch(): Promise<string> {
-    return state.defaultBranch;
-  }
+async function createRef(ctx: Ctx, ref: string, sha: string): Promise<void> {
+  if (ctx.state.refs[ref]) throw new RefAlreadyExistsError(ref);
+  ensureCommit(ctx, sha);
+  ctx.state.refs[ref] = { ref, sha, committedAt: ctx.nowIso() };
+}
 
-  async function createRef(ref: string, sha: string): Promise<void> {
-    if (state.refs[ref]) throw new RefAlreadyExistsError(ref);
-    ensureCommit(sha);
-    state.refs[ref] = { ref, sha, committedAt: nowIso() };
-  }
+async function deleteRef(ctx: Ctx, ref: string): Promise<void> {
+  delete ctx.state.refs[ref];
+}
 
-  async function deleteRef(ref: string): Promise<void> {
-    delete state.refs[ref];
-  }
+async function getRef(ctx: Ctx, ref: string): Promise<RefInfo | null> {
+  const entry = ctx.state.refs[ref];
+  return entry ? { ...entry } : null;
+}
 
-  async function getRef(ref: string): Promise<RefInfo | null> {
-    const entry = state.refs[ref];
-    return entry ? { ...entry } : null;
-  }
+async function createLockCommit(ctx: Ctx, message: string, parentSha: string): Promise<string> {
+  const parent = ensureCommit(ctx, parentSha);
+  const sha = nextSha(ctx);
+  ctx.state.commits[sha] = {
+    sha,
+    tree: parent.tree,
+    parents: [parentSha],
+    committedAt: ctx.nowIso(),
+    message,
+  };
+  return sha;
+}
 
-  async function createLockCommit(message: string, parentSha: string): Promise<string> {
-    const parent = ensureCommit(parentSha);
-    const sha = nextSha();
-    state.commits[sha] = { sha, tree: parent.tree, parents: [parentSha], committedAt: nowIso() };
-    void message; // recorded on the real ref's commit message; not modelled here
-    return sha;
-  }
+/** Modelled because the lock reads it back to name the request it is ending. */
+async function getCommitMessage(ctx: Ctx, sha: string): Promise<string | null> {
+  return ctx.state.commits[sha]?.message ?? null;
+}
 
-  async function createPullRequest(input: {
-    title: string;
-    head: string;
-    base: string;
-    body: string;
-  }): Promise<PullRequestInfo> {
-    const number = nextPrNumber++;
-    const headSha = state.refs[headsRef(input.head)]?.sha ?? nextSha();
-    const pr: PullRequestInfo = {
-      number,
-      title: input.title,
-      body: input.body,
-      state: 'open',
-      merged: false,
-      headRef: input.head,
-      headSha,
-      baseRef: input.base,
-      updatedAt: nowIso(),
-    };
-    state.pullRequests.push(pr);
-    state.comments[number] = [];
-    return { ...pr };
-  }
+async function createPullRequest(
+  ctx: Ctx,
+  input: { title: string; head: string; base: string; body: string },
+): Promise<PullRequestInfo> {
+  const number = ctx.counters.nextPrNumber++;
+  const headSha = ctx.state.refs[headsRef(input.head)]?.sha ?? nextSha(ctx);
+  const pr: PullRequestInfo = {
+    number,
+    title: input.title,
+    body: input.body,
+    state: 'open',
+    merged: false,
+    headRef: input.head,
+    headSha,
+    baseRef: input.base,
+    updatedAt: ctx.nowIso(),
+  };
+  ctx.state.pullRequests.push(pr);
+  ctx.state.comments[number] = [];
+  return { ...pr };
+}
 
-  async function getPullRequest(number: number): Promise<PullRequestInfo | null> {
-    const pr = state.pullRequests.find((candidate) => candidate.number === number);
-    return pr ? { ...pr } : null;
-  }
+async function getPullRequest(ctx: Ctx, number: number): Promise<PullRequestInfo | null> {
+  const pr = ctx.state.pullRequests.find((candidate) => candidate.number === number);
+  return pr ? { ...pr } : null;
+}
 
-  async function listPullRequests(): Promise<PullRequestInfo[]> {
-    // Newest first, matching the real API's default list order.
-    return [...state.pullRequests].sort((a, b) => b.number - a.number).map((pr) => ({ ...pr }));
-  }
+async function listPullRequests(ctx: Ctx): Promise<PullRequestInfo[]> {
+  // Newest first, matching the real API's default list order.
+  return [...ctx.state.pullRequests].sort((a, b) => b.number - a.number).map((pr) => ({ ...pr }));
+}
 
-  async function updatePullRequest(
-    number: number,
-    input: { title?: string; body?: string; state?: 'open' | 'closed' },
-  ): Promise<PullRequestInfo> {
-    const pr = requirePullRequest(number);
-    Object.assign(pr, input, { updatedAt: nowIso() });
-    return { ...pr };
-  }
+async function updatePullRequest(
+  ctx: Ctx,
+  number: number,
+  input: { title?: string; body?: string; state?: 'open' | 'closed' },
+): Promise<PullRequestInfo> {
+  const pr = requirePullRequest(ctx, number);
+  Object.assign(pr, input, { updatedAt: ctx.nowIso() });
+  return { ...pr };
+}
 
-  async function listComments(number: number): Promise<CommentInfo[]> {
-    requirePullRequest(number);
-    return (state.comments[number] ?? []).map((comment) => ({ ...comment }));
-  }
+async function listComments(ctx: Ctx, number: number): Promise<CommentInfo[]> {
+  requirePullRequest(ctx, number);
+  return (ctx.state.comments[number] ?? []).map((comment) => ({ ...comment }));
+}
 
-  async function createComment(number: number, body: string): Promise<CommentInfo> {
-    requirePullRequest(number);
-    const comment: CommentInfo = {
-      id: (nextCommentId += 1),
-      author: 'webagent-bot',
-      body,
-      createdAt: nowIso(),
-    };
-    (state.comments[number] ??= []).push(comment);
-    return { ...comment };
-  }
+async function createComment(ctx: Ctx, number: number, body: string): Promise<CommentInfo> {
+  requirePullRequest(ctx, number);
+  const comment: CommentInfo = {
+    id: (ctx.counters.nextCommentId += 1),
+    author: 'webagent-bot',
+    body,
+    createdAt: ctx.nowIso(),
+  };
+  (ctx.state.comments[number] ??= []).push(comment);
+  return { ...comment };
+}
 
-  async function updateComment(commentId: number, body: string): Promise<CommentInfo> {
-    for (const comments of Object.values(state.comments)) {
-      const comment = comments.find((candidate) => candidate.id === commentId);
-      if (comment) {
-        comment.body = body;
-        return { ...comment };
-      }
+async function updateComment(ctx: Ctx, commentId: number, body: string): Promise<CommentInfo> {
+  for (const comments of Object.values(ctx.state.comments)) {
+    const comment = comments.find((candidate) => candidate.id === commentId);
+    if (comment) {
+      comment.body = body;
+      return { ...comment };
     }
-    throw new Error(`no such comment: ${commentId}`);
   }
+  throw new Error(`no such comment: ${commentId}`);
+}
 
-  async function mergePullRequest(number: number): Promise<{ sha: string }> {
-    const pr = requirePullRequest(number);
-    const baseTip = state.refs[headsRef(state.defaultBranch)];
-    const mergeSha = nextSha();
-    state.commits[mergeSha] = {
-      sha: mergeSha,
-      tree: ensureCommit(pr.headSha).tree,
-      parents: [baseTip?.sha, pr.headSha].filter((sha): sha is string => Boolean(sha)),
-      committedAt: nowIso(),
-    };
-    state.refs[headsRef(state.defaultBranch)] = {
-      ref: headsRef(state.defaultBranch),
-      sha: mergeSha,
-      committedAt: nowIso(),
-    };
-    Object.assign(pr, {
-      merged: true,
-      state: 'closed',
-      mergeCommitSha: mergeSha,
-      updatedAt: nowIso(),
-    });
-    return { sha: mergeSha };
-  }
+async function mergePullRequest(ctx: Ctx, number: number): Promise<{ sha: string }> {
+  const pr = requirePullRequest(ctx, number);
+  const baseTip = ctx.state.refs[headsRef(ctx.state.defaultBranch)];
+  const mergeSha = nextSha(ctx);
+  ctx.state.commits[mergeSha] = {
+    sha: mergeSha,
+    tree: ensureCommit(ctx, pr.headSha).tree,
+    parents: [baseTip?.sha, pr.headSha].filter((sha): sha is string => Boolean(sha)),
+    committedAt: ctx.nowIso(),
+  };
+  ctx.state.refs[headsRef(ctx.state.defaultBranch)] = {
+    ref: headsRef(ctx.state.defaultBranch),
+    sha: mergeSha,
+    committedAt: ctx.nowIso(),
+  };
+  Object.assign(pr, { merged: true, state: 'closed', mergeCommitSha: mergeSha, updatedAt: ctx.nowIso() });
+  return { sha: mergeSha };
+}
 
-  async function revertCommit(sha: string, branch: string): Promise<{ sha: string }> {
-    const merge = state.commits[sha];
-    if (!merge) throw new Error(`no such commit: ${sha}`);
-    const mainlineParentSha = merge.parents[0];
-    if (!mainlineParentSha)
-      throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
-    const mainlineParent = ensureCommit(mainlineParentSha);
-    const currentTip = state.refs[headsRef(branch)];
-    if (!currentTip) throw new Error(`no such branch: ${branch}`);
+async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sha: string }> {
+  const merge = ctx.state.commits[sha];
+  if (!merge) throw new Error(`no such commit: ${sha}`);
+  const mainlineParentSha = merge.parents[0];
+  if (!mainlineParentSha) throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
+  const mainlineParent = ensureCommit(ctx, mainlineParentSha);
+  const currentTip = ctx.state.refs[headsRef(branch)];
+  if (!currentTip) throw new Error(`no such branch: ${branch}`);
 
-    const revertSha = nextSha();
-    state.commits[revertSha] = {
-      sha: revertSha,
-      tree: mainlineParent.tree,
-      parents: [currentTip.sha],
-      committedAt: nowIso(),
-    };
-    state.refs[headsRef(branch)] = { ref: headsRef(branch), sha: revertSha, committedAt: nowIso() };
-    return { sha: revertSha };
-  }
+  const revertSha = nextSha(ctx);
+  ctx.state.commits[revertSha] = {
+    sha: revertSha,
+    tree: mainlineParent.tree,
+    parents: [currentTip.sha],
+    committedAt: ctx.nowIso(),
+  };
+  ctx.state.refs[headsRef(branch)] = { ref: headsRef(branch), sha: revertSha, committedAt: ctx.nowIso() };
+  return { sha: revertSha };
+}
 
-  async function authenticatedRemoteUrl(): Promise<string> {
-    return 'https://x-access-token:fake-installation-token@github.com/fake-owner/fake-repo.git';
-  }
+async function authenticatedRemoteUrl(): Promise<string> {
+  return 'https://x-access-token:fake-installation-token@github.com/fake-owner/fake-repo.git';
+}
+
+export function createFakeRepoClient(seed?: FakeRepoClientSeed): RepoClient & { readonly state: FakeState } {
+  const clock = seed?.now ?? (() => new Date());
+  const nowIso = (): string => clock().toISOString();
+  const state = buildInitialState(seed, nowIso);
+  const startingPrNumber = state.pullRequests.reduce((max, pr) => Math.max(max, pr.number), 0) + 1;
+  const ctx: Ctx = {
+    state,
+    nowIso,
+    counters: { nextPrNumber: startingPrNumber, nextCommentId: 5000, shaCounter: 0 },
+  };
 
   return {
-    readFile,
-    getDefaultBranch,
-    createRef,
-    deleteRef,
-    getRef,
-    createLockCommit,
-    createPullRequest,
-    getPullRequest,
-    listPullRequests,
-    updatePullRequest,
-    listComments,
-    createComment,
-    updateComment,
-    mergePullRequest,
-    revertCommit,
+    readFile: (path, ref) => readFile(ctx, path, ref),
+    getDefaultBranch: () => getDefaultBranch(ctx),
+    createRef: (ref, sha) => createRef(ctx, ref, sha),
+    deleteRef: (ref) => deleteRef(ctx, ref),
+    getRef: (ref) => getRef(ctx, ref),
+    createLockCommit: (message, parentSha) => createLockCommit(ctx, message, parentSha),
+    getCommitMessage: (sha) => getCommitMessage(ctx, sha),
+    createPullRequest: (input) => createPullRequest(ctx, input),
+    getPullRequest: (number) => getPullRequest(ctx, number),
+    listPullRequests: () => listPullRequests(ctx),
+    updatePullRequest: (number, input) => updatePullRequest(ctx, number, input),
+    listComments: (number) => listComments(ctx, number),
+    createComment: (number, body) => createComment(ctx, number, body),
+    updateComment: (commentId, body) => updateComment(ctx, commentId, body),
+    mergePullRequest: (number) => mergePullRequest(ctx, number),
+    revertCommit: (sha, branch) => revertCommit(ctx, sha, branch),
     authenticatedRemoteUrl,
     state,
   };

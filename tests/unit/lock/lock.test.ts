@@ -21,6 +21,7 @@ import { createLock, LOCK_REF } from '@/lib/lock/lock';
  */
 class FakeRepoClient implements RepoClient {
   private readonly refs = new Map<string, RefInfo>();
+  private readonly commitMessages = new Map<string, string>();
   private lockCommitSeq = 0;
 
   constructor(
@@ -56,8 +57,14 @@ class FakeRepoClient implements RepoClient {
     return this.refs.get(ref) ?? null;
   }
 
-  async createLockCommit(_message: string, _parentSha: string): Promise<string> {
-    return `lock-sha-${++this.lockCommitSeq}`;
+  async createLockCommit(message: string, _parentSha: string): Promise<string> {
+    const sha = `lock-sha-${++this.lockCommitSeq}`;
+    this.commitMessages.set(sha, message);
+    return sha;
+  }
+
+  async getCommitMessage(sha: string): Promise<string | null> {
+    return this.commitMessages.get(sha) ?? null;
   }
 
   async createPullRequest(): Promise<PullRequestInfo> {
