@@ -74,10 +74,22 @@ export type RunOutcome =
   | { started: false; errorCode: 'request_in_flight'; heldSince: string }
   | { started: true; requestId: string; outcome: Outcome; record: RequestRecord };
 
+/**
+ * What a caller learns the moment the lock has answered, before the work runs.
+ *
+ * The HTTP contract owes a client `202` or `409` immediately, and the only
+ * thing that can decide between them is the lock. Holding the connection open
+ * for the whole request would instead tie its fate to a browser tab, so
+ * acquisition is awaited and everything after it is not.
+ */
+export type BeginOutcome =
+  | { started: false; errorCode: 'request_in_flight'; heldSince: string }
+  | { started: true; requestId: string; completed: Promise<RunOutcome> };
+
 /** Bounds the wait for a preview independently of the agent's own timeout. */
 const PREVIEW_TIMEOUT_MS = 10 * 60_000;
 
-export async function runRequest(deps: RunDeps, input: RunInput): Promise<RunOutcome> {
+export async function beginRequest(deps: RunDeps, input: RunInput): Promise<BeginOutcome> {
   const requestId = input.requestId ?? `r_${randomUUID()}`;
   const acquired = await deps.lock.acquire(requestId, deps.config.settings.maxRequestMinutes);
 
@@ -87,12 +99,15 @@ export async function runRequest(deps: RunDeps, input: RunInput): Promise<RunOut
 
   // A stale lock is broken rather than waited on, and the request it belonged to
   // is given the ending its own process never wrote.
-  if (!acquired.ok) {
-    await recordAbandoned(deps, input, acquired.brokenRequestId);
-    return execute(deps, input, requestId, acquired.handle);
-  }
+  if (!acquired.ok) await recordAbandoned(deps, input, acquired.brokenRequestId);
 
-  return execute(deps, input, requestId, acquired.handle);
+  return { started: true, requestId, completed: execute(deps, input, requestId, acquired.handle) };
+}
+
+/** Runs a request to completion. Convenient for tests and for anything not answering HTTP. */
+export async function runRequest(deps: RunDeps, input: RunInput): Promise<RunOutcome> {
+  const begun = await beginRequest(deps, input);
+  return begun.started ? begun.completed : begun;
 }
 
 // ---------------------------------------------------------------------------
