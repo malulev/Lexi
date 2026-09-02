@@ -36,16 +36,23 @@ function fakeFetch(routes: Record<string, Fixture>) {
   const calls: string[] = [];
   const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : input.toString();
-    const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+    const method = (
+      init?.method ?? (input instanceof Request ? input.method : 'GET')
+    ).toUpperCase();
     const path = decodeURIComponent(new URL(url).pathname);
     const key = `${method} ${path}`;
     calls.push(key);
     const fixture = routes[key];
     if (!fixture) {
-      throw new Error(`no fixture registered for "${key}". Registered: ${Object.keys(routes).join(', ')}`);
+      throw new Error(
+        `no fixture registered for "${key}". Registered: ${Object.keys(routes).join(', ')}`,
+      );
     }
     const body = fixture.body === null ? null : JSON.stringify(fixture.body);
-    return new Response(body, { status: fixture.status, headers: { 'content-type': 'application/json' } });
+    return new Response(body, {
+      status: fixture.status,
+      headers: { 'content-type': 'application/json' },
+    });
   }) as typeof fetch;
   return { fetch: impl, calls };
 }
@@ -131,7 +138,9 @@ describe('createRepoClient', () => {
     const { fetch } = fakeFetch({ 'POST /repos/acme/site/git/refs': refCreateConflict as Fixture });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
-    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.toThrow(RefAlreadyExistsError);
+    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.toThrow(
+      RefAlreadyExistsError,
+    );
   });
 
   it('does not mistake every 422 for a ref conflict', async () => {
@@ -140,7 +149,9 @@ describe('createRepoClient', () => {
     });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
-    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.not.toThrow(RefAlreadyExistsError);
+    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.not.toThrow(
+      RefAlreadyExistsError,
+    );
   });
 
   it('deletes a ref', async () => {
@@ -164,7 +175,8 @@ describe('createRepoClient', () => {
   it('returns ref info carrying the committer date of the commit it points at', async () => {
     const { fetch } = fakeFetch({
       'GET /repos/acme/site/git/ref/heads/webagent/c-1': refGet as Fixture,
-      'GET /repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd': commitGet as Fixture,
+      'GET /repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd':
+        commitGet as Fixture,
     });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
@@ -255,7 +267,10 @@ describe('createRepoClient', () => {
     const prs = await client.listPullRequests();
     expect(prs).toHaveLength(2);
     expect(prs.map((p) => p.number)).toEqual([2, 1]);
-    expect(prs[1]).toMatchObject({ merged: true, mergeCommitSha: 'e1e2e3e4e5e6e7e8e9eae1e2e3e4e5e6e7e8e9ea' });
+    expect(prs[1]).toMatchObject({
+      merged: true,
+      mergeCommitSha: 'e1e2e3e4e5e6e7e8e9eae1e2e3e4e5e6e7e8e9ea',
+    });
   });
 
   it('updates a pull request', async () => {
@@ -267,7 +282,9 @@ describe('createRepoClient', () => {
   });
 
   it('lists comments in creation order', async () => {
-    const { fetch } = fakeFetch({ 'GET /repos/acme/site/issues/1/comments': commentList as Fixture });
+    const { fetch } = fakeFetch({
+      'GET /repos/acme/site/issues/1/comments': commentList as Fixture,
+    });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
     const comments = await client.listComments(1);
@@ -276,7 +293,9 @@ describe('createRepoClient', () => {
   });
 
   it('creates a comment', async () => {
-    const { fetch } = fakeFetch({ 'POST /repos/acme/site/issues/1/comments': commentCreate as Fixture });
+    const { fetch } = fakeFetch({
+      'POST /repos/acme/site/issues/1/comments': commentCreate as Fixture,
+    });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
     const comment = await client.createComment(1, 'Preview ready.');
@@ -304,8 +323,10 @@ describe('createRepoClient', () => {
 
   it('reverts a merge on the default branch by replaying the mainline tree onto the branch tip', async () => {
     const { fetch } = fakeFetch({
-      'GET /repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd': commitGet as Fixture,
-      'GET /repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405': commitGetParent as Fixture,
+      'GET /repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd':
+        commitGet as Fixture,
+      'GET /repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405':
+        commitGetParent as Fixture,
       'GET /repos/acme/site/git/ref/heads/main': refGetMain as Fixture,
       'POST /repos/acme/site/git/commits': commitCreate as Fixture,
       'PATCH /repos/acme/site/git/refs/heads/main': refUpdate as Fixture,

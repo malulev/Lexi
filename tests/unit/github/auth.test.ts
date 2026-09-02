@@ -156,7 +156,10 @@ describe('createTokenMinter', () => {
     const mintToken = vi.fn(async () => {
       throw new Error(`upstream rejected request carrying ${secretToken}`);
     });
-    const minter = createTokenMinter(env, { now: () => new Date('2026-01-01T00:00:00.000Z'), mintToken });
+    const minter = createTokenMinter(env, {
+      now: () => new Date('2026-01-01T00:00:00.000Z'),
+      mintToken,
+    });
 
     await expect(minter.getToken()).rejects.toThrow();
     try {

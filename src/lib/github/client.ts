@@ -26,7 +26,7 @@ function stripRefsPrefix(ref: string): string {
 
 function statusOf(error: unknown): number | undefined {
   return typeof error === 'object' && error !== null && 'status' in error
-    ? (error as { status?: unknown }).status as number | undefined
+    ? ((error as { status?: unknown }).status as number | undefined)
     : undefined;
 }
 
@@ -105,7 +105,10 @@ export function createRepoClient(
   // Retries are disabled: this client throws promptly and lets the caller
   // (the worker, the lock) decide whether and when to try again. Automatic
   // retry-with-backoff would also make a transient-failure test slow.
-  const octokit = new Octokit({ request: { fetch: deps?.fetch ?? fetch }, retry: { enabled: false } });
+  const octokit = new Octokit({
+    request: { fetch: deps?.fetch ?? fetch },
+    retry: { enabled: false },
+  });
 
   /** Fetched fresh per call: `TokenMinter` caches internally, this never does. */
   async function authHeaders(): Promise<{ authorization: string }> {
@@ -161,7 +164,12 @@ export function createRepoClient(
   async function getRef(ref: string): Promise<RefInfo | null> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.git.getRef({ owner, repo, ref: stripRefsPrefix(ref), headers });
+      const { data } = await octokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: stripRefsPrefix(ref),
+        headers,
+      });
       const sha = data.object.sha;
       const commit = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
       return { ref: data.ref, sha, committedAt: commit.data.committer.date };
@@ -174,7 +182,12 @@ export function createRepoClient(
   async function createLockCommit(message: string, parentSha: string): Promise<string> {
     try {
       const headers = await authHeaders();
-      const parent = await octokit.rest.git.getCommit({ owner, repo, commit_sha: parentSha, headers });
+      const parent = await octokit.rest.git.getCommit({
+        owner,
+        repo,
+        commit_sha: parentSha,
+        headers,
+      });
       const created = await octokit.rest.git.createCommit({
         owner,
         repo,
@@ -218,7 +231,13 @@ export function createRepoClient(
   async function listPullRequests(): Promise<PullRequestInfo[]> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'all', per_page: 100, headers });
+      const { data } = await octokit.rest.pulls.list({
+        owner,
+        repo,
+        state: 'all',
+        per_page: 100,
+        headers,
+      });
       return data.map(toPullRequestInfo);
     } catch (error) {
       throw describeError('list pull requests', repoSlug, error);
@@ -231,7 +250,13 @@ export function createRepoClient(
   ): Promise<PullRequestInfo> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.update({ owner, repo, pull_number: number, ...input, headers });
+      const { data } = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: number,
+        ...input,
+        headers,
+      });
       return toPullRequestInfo(data);
     } catch (error) {
       throw describeError(`update pull request #${number}`, repoSlug, error);
@@ -242,7 +267,12 @@ export function createRepoClient(
     try {
       const headers = await authHeaders();
       // Ascending by creation time is the API default: creation order, as required.
-      const { data } = await octokit.rest.issues.listComments({ owner, repo, issue_number: number, headers });
+      const { data } = await octokit.rest.issues.listComments({
+        owner,
+        repo,
+        issue_number: number,
+        headers,
+      });
       return data.map(toCommentInfo);
     } catch (error) {
       throw describeError(`list comments on #${number}`, repoSlug, error);
@@ -252,7 +282,13 @@ export function createRepoClient(
   async function createComment(number: number, body: string): Promise<CommentInfo> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: number, body, headers });
+      const { data } = await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: number,
+        body,
+        headers,
+      });
       return toCommentInfo(data);
     } catch (error) {
       throw describeError(`create comment on #${number}`, repoSlug, error);
@@ -262,7 +298,13 @@ export function createRepoClient(
   async function updateComment(commentId: number, body: string): Promise<CommentInfo> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.issues.updateComment({ owner, repo, comment_id: commentId, body, headers });
+      const { data } = await octokit.rest.issues.updateComment({
+        owner,
+        repo,
+        comment_id: commentId,
+        body,
+        headers,
+      });
       return toCommentInfo(data);
     } catch (error) {
       throw describeError(`update comment ${commentId}`, repoSlug, error);
@@ -272,7 +314,12 @@ export function createRepoClient(
   async function mergePullRequest(number: number): Promise<{ sha: string }> {
     try {
       const headers = await authHeaders();
-      const { data } = await octokit.rest.pulls.merge({ owner, repo, pull_number: number, headers });
+      const { data } = await octokit.rest.pulls.merge({
+        owner,
+        repo,
+        pull_number: number,
+        headers,
+      });
       return { sha: data.sha };
     } catch (error) {
       throw describeError(`merge pull request #${number}`, repoSlug, error);
@@ -316,7 +363,13 @@ export function createRepoClient(
         parents: [currentTip.data.object.sha],
         headers,
       });
-      await octokit.rest.git.updateRef({ owner, repo, ref: refPath, sha: created.data.sha, headers });
+      await octokit.rest.git.updateRef({
+        owner,
+        repo,
+        ref: refPath,
+        sha: created.data.sha,
+        headers,
+      });
       return { sha: created.data.sha };
     } catch (error) {
       throw describeError(`revert commit ${sha} on ${branch}`, repoSlug, error);

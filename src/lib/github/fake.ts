@@ -39,14 +39,28 @@ function headsRef(branch: string): string {
   return `refs/heads/${branch}`;
 }
 
-function buildInitialState(seed?: FakeRepoClientSeed, genesisSha = 'fake-genesis-commit'): FakeState {
+function buildInitialState(
+  seed?: FakeRepoClientSeed,
+  genesisSha = 'fake-genesis-commit',
+): FakeState {
   const defaultBranch = seed?.defaultBranch ?? 'main';
   const now = (seed?.now ?? (() => new Date()))().toISOString();
-  const genesis: FakeCommit = { sha: genesisSha, tree: 'fake-genesis-tree', parents: [], committedAt: now };
+  const genesis: FakeCommit = {
+    sha: genesisSha,
+    tree: 'fake-genesis-tree',
+    parents: [],
+    committedAt: now,
+  };
   return {
     defaultBranch,
     files: { ...(seed?.files ?? {}) },
-    refs: { [headsRef(defaultBranch)]: { ref: headsRef(defaultBranch), sha: genesisSha, committedAt: now } },
+    refs: {
+      [headsRef(defaultBranch)]: {
+        ref: headsRef(defaultBranch),
+        sha: genesisSha,
+        committedAt: now,
+      },
+    },
     commits: { [genesisSha]: genesis },
     pullRequests: [...(seed?.pullRequests ?? [])],
     comments: {},
@@ -67,7 +81,12 @@ export function createFakeRepoClient(
 
   /** A commit created or referenced without prior seeding still resolves, so a test need not pre-populate every sha it hands the fake. */
   function ensureCommit(sha: string): FakeCommit {
-    return (state.commits[sha] ??= { sha, tree: `fake-tree-for-${sha}`, parents: [], committedAt: nowIso() });
+    return (state.commits[sha] ??= {
+      sha,
+      tree: `fake-tree-for-${sha}`,
+      parents: [],
+      committedAt: nowIso(),
+    });
   }
 
   function requirePullRequest(number: number): PullRequestInfo {
@@ -157,7 +176,12 @@ export function createFakeRepoClient(
 
   async function createComment(number: number, body: string): Promise<CommentInfo> {
     requirePullRequest(number);
-    const comment: CommentInfo = { id: (nextCommentId += 1), author: 'webagent-bot', body, createdAt: nowIso() };
+    const comment: CommentInfo = {
+      id: (nextCommentId += 1),
+      author: 'webagent-bot',
+      body,
+      createdAt: nowIso(),
+    };
     (state.comments[number] ??= []).push(comment);
     return { ...comment };
   }
@@ -188,7 +212,12 @@ export function createFakeRepoClient(
       sha: mergeSha,
       committedAt: nowIso(),
     };
-    Object.assign(pr, { merged: true, state: 'closed', mergeCommitSha: mergeSha, updatedAt: nowIso() });
+    Object.assign(pr, {
+      merged: true,
+      state: 'closed',
+      mergeCommitSha: mergeSha,
+      updatedAt: nowIso(),
+    });
     return { sha: mergeSha };
   }
 
@@ -196,7 +225,8 @@ export function createFakeRepoClient(
     const merge = state.commits[sha];
     if (!merge) throw new Error(`no such commit: ${sha}`);
     const mainlineParentSha = merge.parents[0];
-    if (!mainlineParentSha) throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
+    if (!mainlineParentSha)
+      throw new Error(`commit ${sha} has no parent; it is not a merge commit`);
     const mainlineParent = ensureCommit(mainlineParentSha);
     const currentTip = state.refs[headsRef(branch)];
     if (!currentTip) throw new Error(`no such branch: ${branch}`);

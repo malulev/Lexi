@@ -23,7 +23,9 @@ describe('createFakeRepoClient', () => {
   it('creates a ref once, and rejects a second create of the same ref with RefAlreadyExistsError (R3)', async () => {
     const client = createFakeRepoClient();
     await client.createRef('refs/webagent/lock', 'deadbeef');
-    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.toThrow(RefAlreadyExistsError);
+    await expect(client.createRef('refs/webagent/lock', 'deadbeef')).rejects.toThrow(
+      RefAlreadyExistsError,
+    );
   });
 
   it('returns null from getRef for a ref that was never created', async () => {
@@ -67,15 +69,30 @@ describe('createFakeRepoClient', () => {
 
   it('assigns pull request numbers starting at 1 and incrementing', async () => {
     const client = createFakeRepoClient();
-    const first = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
-    const second = await client.createPullRequest({ title: 'B', head: 'webagent/c-2', base: 'main', body: '' });
+    const first = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
+    const second = await client.createPullRequest({
+      title: 'B',
+      head: 'webagent/c-2',
+      base: 'main',
+      body: '',
+    });
     expect(first.number).toBe(1);
     expect(second.number).toBe(2);
   });
 
   it('round-trips a pull request through get and list', async () => {
     const client = createFakeRepoClient();
-    const created = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: 'x' });
+    const created = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: 'x',
+    });
 
     await expect(client.getPullRequest(created.number)).resolves.toMatchObject({ title: 'A' });
     await expect(client.getPullRequest(999)).resolves.toBeNull();
@@ -86,14 +103,24 @@ describe('createFakeRepoClient', () => {
 
   it('updates a pull request in place', async () => {
     const client = createFakeRepoClient();
-    const created = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
+    const created = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
     const updated = await client.updatePullRequest(created.number, { state: 'closed' });
     expect(updated.state).toBe('closed');
   });
 
   it('accumulates comments and returns them in creation order', async () => {
     const client = createFakeRepoClient();
-    const pr = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
+    const pr = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
 
     await client.createComment(pr.number, 'first');
     await client.createComment(pr.number, 'second');
@@ -105,7 +132,12 @@ describe('createFakeRepoClient', () => {
 
   it('updates a comment body without disturbing its position', async () => {
     const client = createFakeRepoClient();
-    const pr = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
+    const pr = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
     const comment = await client.createComment(pr.number, 'first');
 
     await client.updateComment(comment.id, 'first, revised');
@@ -117,20 +149,33 @@ describe('createFakeRepoClient', () => {
 
   it('merges a pull request and advances the default branch', async () => {
     const client = createFakeRepoClient();
-    const before = await client.getRef(`refs/heads/${(await client.getDefaultBranch())}`);
-    const pr = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
+    const before = await client.getRef(`refs/heads/${await client.getDefaultBranch()}`);
+    const pr = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
 
     const merged = await client.mergePullRequest(pr.number);
 
-    const after = await client.getRef(`refs/heads/${(await client.getDefaultBranch())}`);
+    const after = await client.getRef(`refs/heads/${await client.getDefaultBranch()}`);
     expect(after?.sha).toBe(merged.sha);
     expect(after?.sha).not.toBe(before?.sha);
-    await expect(client.getPullRequest(pr.number)).resolves.toMatchObject({ merged: true, state: 'closed' });
+    await expect(client.getPullRequest(pr.number)).resolves.toMatchObject({
+      merged: true,
+      state: 'closed',
+    });
   });
 
   it('reverts a merge, moving the default branch to a new commit built from the mainline tree', async () => {
     const client = createFakeRepoClient();
-    const pr = await client.createPullRequest({ title: 'A', head: 'webagent/c-1', base: 'main', body: '' });
+    const pr = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
     const merged = await client.mergePullRequest(pr.number);
 
     const branch = await client.getDefaultBranch();
