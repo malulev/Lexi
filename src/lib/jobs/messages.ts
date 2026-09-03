@@ -22,8 +22,55 @@ export const CLIENT_MESSAGES: Record<ErrorCode, string> = {
   cost_ceiling: 'That request was larger than this site’s limit allows.',
   out_of_date: 'Your site changed since this was made — it needs rebuilding first.',
   nothing_to_change: 'Nothing needed changing for that.',
+  nothing_to_publish: 'There is nothing ready to publish here.',
+  nothing_to_undo: 'There is nothing here to undo.',
+  site_moved_on:
+    'Your website has changed since this went live, so undoing it now would take those newer changes with it.',
   internal_error: 'Something went wrong on my side. Nothing was published.',
 };
+
+/**
+ * The one ending with no error code of its own.
+ *
+ * An abandoned request failed at nothing — its process stopped existing, so
+ * there is no stage that went wrong and no code to name. It still owes the
+ * client a sentence, and that sentence belongs in this table with the others
+ * so the Principle I audit covers it too.
+ */
+export const INTERRUPTED_MESSAGE =
+  'That request was interrupted before it finished. Nothing was published.';
+
+/**
+ * Why publishing or undoing was refused, in more detail than the code alone.
+ *
+ * These live here rather than beside the routes that answer them for one
+ * reason: `tests/unit/messages.test.ts` audits this module against Principle I,
+ * and a client-facing sentence written anywhere else is a sentence nothing
+ * checks. They refine `nothing_to_publish` and `nothing_to_undo` — the code is
+ * what the interface branches on, the sentence is what the client reads.
+ */
+export const PUBLISH_REFUSALS = {
+  not_previewed:
+    'There is nothing ready to publish here yet. Wait for the preview, then approve it.',
+  published: 'This change is already published.',
+  undone: 'This change was published and then undone. Start a new one to change your site again.',
+  unavailable: 'This conversation is finished, so there is nothing to publish.',
+} as const;
+
+export const UNDO_REFUSALS = {
+  not_previewed: 'Nothing from this conversation has been published, so there is nothing to undo.',
+  ready: 'This change has not been published yet, so there is nothing to undo.',
+  undone: 'This change has already been undone.',
+  unavailable: 'Nothing from this conversation is live, so there is nothing to undo.',
+} as const;
+
+/** Every sentence a client can be shown when something does not go ahead. */
+export const CLIENT_PROSE: readonly string[] = [
+  ...Object.values(CLIENT_MESSAGES),
+  INTERRUPTED_MESSAGE,
+  ...Object.values(PUBLISH_REFUSALS),
+  ...Object.values(UNDO_REFUSALS),
+];
 
 /** The HTTP status each code answers with, per contracts/http-api.md. */
 export const ERROR_STATUS: Record<ErrorCode, number> = {
@@ -35,6 +82,9 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   cost_ceiling: 422,
   out_of_date: 409,
   nothing_to_change: 200,
+  nothing_to_publish: 409,
+  nothing_to_undo: 409,
+  site_moved_on: 409,
   internal_error: 500,
 };
 
@@ -52,7 +102,19 @@ export function messageForViolation(_violation: PolicyViolation): string {
   return CLIENT_MESSAGES.blocked_by_policy;
 }
 
-/** The body every route returns on a failure. Shape is uniform so the interface never guesses. */
-export function errorBody(code: ErrorCode): { error: ErrorCode; message: string } {
-  return { error: code, message: clientMessage(code) };
+/**
+ * The body every route returns on a failure. Shape is uniform so the interface
+ * never guesses.
+ *
+ * `message` may be narrowed past the code's default — "this change is already
+ * published" says more than "there is nothing ready to publish here" — but only
+ * from a sentence in this module, so the Principle I audit still covers it. A
+ * route composing its own sentence would be a client-facing string nothing
+ * checks.
+ */
+export function errorBody(
+  code: ErrorCode,
+  message: string = clientMessage(code),
+): { error: ErrorCode; message: string } {
+  return { error: code, message };
 }

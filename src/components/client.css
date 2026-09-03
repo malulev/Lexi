@@ -638,3 +638,79 @@
     padding: 2.25rem 1.5rem;
   }
 }
+
+/* ---------------------------------------------------------------------- */
+/* Publish and undo                                                        */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * The publish control is deliberately the loudest thing in the chat column
+ * and the undo control deliberately is not: one changes a live website, the
+ * other puts it back.
+ */
+.publish {
+  border-top: 1px solid var(--line);
+  padding: 0.9rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  flex-shrink: 0;
+}
+
+.publish__note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.publish__refusal {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger);
+}
+
+.publish__question {
+  margin: 0;
+  font-weight: 600;
+}
+
+.publish__row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.publish__open,
+.publish__go {
+  background: var(--ok);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.66rem 1.15rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.publish--undo .publish__open,
+.publish--undo .publish__go {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.publish__cancel {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.62rem 1rem;
+  cursor: pointer;
+}
+
+.publish__open:disabled,
+.publish__go:disabled,
+.publish__cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

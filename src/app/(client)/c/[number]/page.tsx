@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 
 import { ConversationView } from '@/components/ConversationView';
-import { readConversation } from '@/lib/conversations';
+import { readConversation, selectPublishState } from '@/lib/conversations';
 import { getInstallation } from '@/lib/installation';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +33,7 @@ export default async function ConversationPage({
       conversation={detail.conversation}
       messages={detail.messages}
       requestInFlight={Boolean(held)}
+      publishState={selectPublishState(detail)}
     />
   );
 }

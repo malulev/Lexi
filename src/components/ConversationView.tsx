@@ -6,8 +6,10 @@ import { useEffect, useState } from 'react';
 import { Composer, selectComposerAvailability } from './Composer';
 import { ConversationStatusBadge, MessageList } from './MessageList';
 import { PreviewPane } from './PreviewPane';
+import { PublishControls } from './PublishControls';
 import { isTerminalStage, ProgressTrail } from './ProgressTrail';
 import { useConversationStream } from './useConversationStream';
+import type { PublishState } from '@/lib/conversations';
 import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
 import type { Conversation, Message } from '@/types';
 
@@ -24,10 +26,13 @@ export function ConversationView({
   conversation,
   messages,
   requestInFlight,
+  publishState,
 }: {
   conversation: Conversation;
   messages: Message[];
   requestInFlight: boolean;
+  /** Derived upstream on every read, so a reload cannot offer a stale button. */
+  publishState: PublishState;
 }) {
   const router = useRouter();
   const [sendRefused, setSendRefused] = useState<string | null>(null);
@@ -80,6 +85,12 @@ export function ConversationView({
         ) : null}
 
         {sendRefused ? <p className="conv__status conv__status--setback">{sendRefused}</p> : null}
+
+        <PublishControls
+          conversationNumber={conversation.number}
+          state={publishState}
+          requestInFlight={running}
+        />
 
         <Composer
           onSend={send}

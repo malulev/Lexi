@@ -122,6 +122,9 @@ export type ErrorCode =
   | 'cost_ceiling'
   | 'out_of_date'
   | 'nothing_to_change'
+  | 'nothing_to_publish'
+  | 'nothing_to_undo'
+  | 'site_moved_on'
   | 'internal_error';
 
 export interface StageEvent {

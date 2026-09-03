@@ -45,6 +45,33 @@ function rejectAllowedEmails(issue: z.core.$ZodIssue): never | void {
   );
 }
 
+/**
+ * Names that read as a credential. The strict schema already rejects every one
+ * of them as unrecognised; this exists so the rejection says *why* (FR-003d).
+ * A developer who commits `netlifyToken` has not made a typo, they have
+ * misunderstood where secrets live, and "unrecognized key" does not correct
+ * that — it invites them to look for the right spelling.
+ */
+const SECRET_SHAPED_KEY =
+  /secret|token|password|passphrase|api[-_]?key|private[-_]?key|credential/i;
+
+/** Rejects a secret committed to the site's repository rather than honouring it (FR-003d). */
+function rejectSecretShapedKey(issue: z.core.$ZodIssue): never | void {
+  if (issue.code !== 'unrecognized_keys') return;
+
+  const offending = issue.keys.filter((key) => SECRET_SHAPED_KEY.test(key));
+  if (offending.length === 0) return;
+
+  // The committed value is deliberately not quoted back: it may well be a live
+  // credential, and this message ends up in an alert email and a container log.
+  throw new Error(
+    `.webagent/config.yml: ${offending.join(', ')} reads as a secret, and secrets do not ` +
+      'belong in the site repository. They are deployment configuration — set them where the ' +
+      'installation is deployed. Anything committed here is readable by everyone with access ' +
+      'to the repository, so this file is rejected rather than honoured.',
+  );
+}
+
 function describeIssue(issue: z.core.$ZodIssue): string {
   const path = issue.path.length > 0 ? issue.path.join('.') : '(root)';
   return `${path}: ${issue.message}`;
@@ -67,6 +94,7 @@ export function parseSettings(source: string): Settings {
 
   for (const issue of result.error.issues) {
     rejectAllowedEmails(issue);
+    rejectSecretShapedKey(issue);
   }
 
   const detail = result.error.issues.map(describeIssue).join('; ');

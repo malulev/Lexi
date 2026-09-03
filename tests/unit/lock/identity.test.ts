@@ -80,4 +80,46 @@ describe('breaking an abandoned lock', () => {
     if (!refused.ok) expect(refused.reason).toBe('held');
     expect(await client.getRef(LOCK_REF)).not.toBeNull();
   });
+  /**
+   * The lock message carries a start time as well as a name, and until now
+   * nothing read it back. An abandoned request's record has to say when the
+   * request began, and the only process that knew has stopped existing — so
+   * the lock commit is the sole surviving witness (data-model.md's Lock
+   * entity: "names the request and its start time").
+   */
+  it('recovers when the broken request began, so its ending is not backdated to now', async () => {
+    const clock = movableClock('2026-09-02T10:00:00Z');
+    const client = createFakeRepoClient({ now: clock.now });
+
+    const first = createLock(client, { now: clock.now });
+    await first.acquire('r_abandoned', 10);
+
+    clock.advanceMinutes(31);
+    const second = createLock(client, { now: clock.now });
+    const broken = await second.acquire('r_new', 10);
+
+    if (broken.ok || broken.reason !== 'broken_stale') {
+      throw new Error(`expected a broken stale lock, got ${JSON.stringify(broken)}`);
+    }
+    expect(broken.brokenStartedAt).toBe('2026-09-02T10:00:00.000Z');
+  });
+
+  it('breaks a lock whose message names a request but no start time', async () => {
+    const clock = movableClock('2026-09-02T10:00:00Z');
+    const client = createFakeRepoClient({ now: clock.now });
+    const terse = { ...client, getCommitMessage: async () => 'webagent-lock: r_old' };
+
+    const first = createLock(client, { now: clock.now });
+    await first.acquire('r_abandoned', 10);
+
+    clock.advanceMinutes(31);
+    const second = createLock(terse, { now: clock.now });
+    const broken = await second.acquire('r_new', 10);
+
+    if (broken.ok || broken.reason !== 'broken_stale') {
+      throw new Error('a lock written by an older version must still be breakable');
+    }
+    expect(broken.brokenRequestId).toBe('r_old');
+    expect(broken.brokenStartedAt).toBeUndefined();
+  });
 });

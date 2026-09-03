@@ -47,6 +47,9 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
   return beginRequest(
     {
       client,
+      // The cost-ceiling alert goes to the developer, and without a mailer here
+      // it is written but never sent.
+      mailer: installation.mailer,
       lock: installation.lock,
       mirror: installation.mirror,
       runner: installation.runner,

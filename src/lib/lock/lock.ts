@@ -21,7 +21,14 @@ export interface LockHandle {
 export type AcquireResult =
   | { ok: true; handle: LockHandle }
   | { ok: false; reason: 'held'; heldSince: string }
-  | { ok: false; reason: 'broken_stale'; handle: LockHandle; brokenRequestId?: string };
+  | {
+      ok: false;
+      reason: 'broken_stale';
+      handle: LockHandle;
+      brokenRequestId?: string;
+      /** When the broken request began, as its own process recorded it. */
+      brokenStartedAt?: string;
+    };
 
 const MS_PER_MINUTE = 60_000;
 
@@ -40,14 +47,29 @@ function buildLockMessage(requestId: string, startedAt: string): string {
 
 const LOCK_MESSAGE_PREFIX = 'webagent-lock: ';
 
+/** Whom a lock belongs to, as far as its own commit message can say. */
+interface LockHolder {
+  requestId: string;
+  startedAt?: string;
+}
+
 /** `undefined` when the message is absent or was not written by this product. */
-function parseLockMessage(message: string | null): string | undefined {
+function parseLockMessage(message: string | null): LockHolder | undefined {
   if (!message?.startsWith(LOCK_MESSAGE_PREFIX)) return undefined;
-  return message.slice(LOCK_MESSAGE_PREFIX.length).split(' started ')[0]?.trim() || undefined;
+
+  const [requestId, startedAt] = message.slice(LOCK_MESSAGE_PREFIX.length).split(' started ');
+  const named = requestId?.trim();
+  if (!named) return undefined;
+
+  // The start time is optional here even though this product always writes
+  // one: a lock written by an older version, or by a hand, is still a lock
+  // worth breaking under a name.
+  const began = startedAt?.trim();
+  return { requestId: named, ...(began ? { startedAt: began } : {}) };
 }
 
 /** Best effort by design: a lock is still breakable when its message cannot be read. */
-async function readHolder(client: RepoClient, sha: string): Promise<string | undefined> {
+async function readHolder(client: RepoClient, sha: string): Promise<LockHolder | undefined> {
   try {
     return parseLockMessage(await client.getCommitMessage(sha));
   } catch {
@@ -97,7 +119,7 @@ async function breakStaleLock(
   staleSha: string,
 ): Promise<AcquireResult> {
   // Read whose request this was before deleting the ref that names it.
-  const brokenRequestId = await readHolder(client, staleSha);
+  const broken = await readHolder(client, staleSha);
   await releaseRef(client, LOCK_REF);
 
   try {
@@ -113,7 +135,8 @@ async function breakStaleLock(
     ok: false,
     reason: 'broken_stale',
     handle: makeHandle(client, requestId, startedAt),
-    ...(brokenRequestId ? { brokenRequestId } : {}),
+    ...(broken?.requestId ? { brokenRequestId: broken.requestId } : {}),
+    ...(broken?.startedAt ? { brokenStartedAt: broken.startedAt } : {}),
   };
 }
 

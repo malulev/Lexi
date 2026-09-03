@@ -1,6 +1,6 @@
 import { RefAlreadyExistsError } from '@/lib/github/types';
 import type { CommentInfo, PullRequestInfo, RepoClient } from '@/lib/github/types';
-import { parseComment } from '@/lib/record/record';
+import { parseComment, renderRecord } from '@/lib/record/record';
 import type { Conversation, Message, RequestRecord } from '@/types';
 
 /**
@@ -223,6 +223,141 @@ export function collectRefusedPaths(records: RequestRecord[]): string[] {
     record.outcome === 'blocked' && record.blockedPath ? [record.blockedPath] : [],
   );
   return [...new Set(paths)];
+}
+
+// ---------------------------------------------------------------------------
+// Publishing and taking back — user story 2
+// ---------------------------------------------------------------------------
+
+/**
+ * Publishing and undoing are finished requests too, so each writes the same
+ * durable record every other request writes, and the two are told apart by the
+ * identifier they carry.
+ *
+ * That identifier is the whole mechanism by which "already published" and
+ * "already undone" survive a restart without a datastore (constitution VII).
+ * The pull request says a change was merged; nothing upstream says a merge was
+ * later reversed, because a revert is an ordinary commit on the default branch
+ * and this product cannot walk that history through the interface it has. The
+ * record it wrote at the time can, and lives in the conversation itself.
+ */
+const PUBLISH_REQUEST_PREFIX = 'publish_';
+const UNDO_REQUEST_PREFIX = 'undo_';
+
+export type PublicationKind = 'publish' | 'undo';
+
+export type PublishState =
+  /** Nothing has succeeded yet, so there is nothing a client could approve. */
+  | 'not_previewed'
+  /** A successful preview stands: approval may be offered (FR-027). */
+  | 'ready'
+  /** Live, and reversible (FR-029). */
+  | 'published'
+  /** Published and then taken back; the conversation is finished. */
+  | 'undone'
+  /** Closed without publishing. */
+  | 'unavailable';
+
+function publicationKindOf(record: RequestRecord): PublicationKind | null {
+  if (record.requestId.startsWith(PUBLISH_REQUEST_PREFIX)) return 'publish';
+  if (record.requestId.startsWith(UNDO_REQUEST_PREFIX)) return 'undo';
+  return null;
+}
+
+/**
+ * What this conversation may do next, derived from what upstream already says.
+ *
+ * The newest request decides, not the best one: a conversation whose first
+ * attempt previewed cleanly and whose second broke the build has a broken
+ * change waiting on its branch, and offering to publish that would publish the
+ * breakage (FR-027, acceptance scenario 5).
+ */
+export function selectPublishState(
+  detail: Pick<ConversationDetail, 'conversation' | 'records'>,
+): PublishState {
+  if (detail.conversation.status === 'published') {
+    const lastPublication = detail.records.map(publicationKindOf).filter(Boolean).at(-1);
+    return lastPublication === 'undo' ? 'undone' : 'published';
+  }
+
+  if (detail.conversation.status === 'closed') return 'unavailable';
+
+  const last = detail.records.at(-1);
+  return last?.outcome === 'succeeded' && last.previewUrl ? 'ready' : 'not_previewed';
+}
+
+/** The record a publish or an undo leaves behind: an audit entry nobody can quietly rewrite (FR-031). */
+export function buildPublicationRecord(input: {
+  kind: PublicationKind;
+  at: string;
+  /** Machine-readable only — it is in the block, never in the prose above it. */
+  commitSha?: string;
+}): RequestRecord {
+  const prefix = input.kind === 'publish' ? PUBLISH_REQUEST_PREFIX : UNDO_REQUEST_PREFIX;
+  return {
+    requestId: `${prefix}${input.at}`,
+    startedAt: input.at,
+    finishedAt: input.at,
+    outcome: 'succeeded',
+    stages: [{ stage: 'succeeded', at: input.at }],
+    ...(input.commitSha ? { commitSha: input.commitSha } : {}),
+  };
+}
+
+/**
+ * What the client reads in the conversation afterwards.
+ *
+ * The acting person is named because this comment is the audit trail (FR-031,
+ * acceptance scenario 4), and the live site is linked because a client who has
+ * just published wants to look at it (FR-028). Neither is a leak: an address
+ * this installation was configured for, and the client's own website.
+ */
+export function publicationProse(input: {
+  kind: PublicationKind;
+  actor: string;
+  liveUrl?: string;
+}): string {
+  if (input.kind === 'undo') {
+    return `Undone by ${input.actor}. Your website is going back to how it was before this change${
+      input.liveUrl ? `, at ${input.liveUrl}` : ''
+    }. It takes a few minutes to update.`;
+  }
+
+  return `Published by ${input.actor}. Your change is going live${
+    input.liveUrl ? ` at ${input.liveUrl}` : ''
+  } and takes a few minutes to appear.`;
+}
+
+/**
+ * Writes the publish or undo into the conversation, where it is both the
+ * client's confirmation and the audit entry (FR-028, FR-031).
+ *
+ * One comment, written after the act rather than before it: a record of a
+ * publish that did not happen would be worse than no record at all.
+ */
+export async function recordPublication(
+  client: RepoClient,
+  input: {
+    conversationNumber: number;
+    kind: PublicationKind;
+    actor: string;
+    at: string;
+    commitSha: string;
+    liveUrl?: string;
+  },
+): Promise<{ commentId: number; record: RequestRecord }> {
+  const record = buildPublicationRecord({
+    kind: input.kind,
+    at: input.at,
+    commitSha: input.commitSha,
+  });
+  const prose = publicationProse({
+    kind: input.kind,
+    actor: input.actor,
+    ...(input.liveUrl ? { liveUrl: input.liveUrl } : {}),
+  });
+  const comment = await client.createComment(input.conversationNumber, renderRecord(prose, record));
+  return { commentId: comment.id, record };
 }
 
 /** A title a client would recognise, drawn from their own words. */

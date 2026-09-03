@@ -1,0 +1,97 @@
+# One installation, one website (constitution VI). This file starts that one
+# installation: the application, which is both the editing interface and the
+# worker, and nothing else. There is no database service here, and adding one
+# is a decision to be argued for in writing (constitution VII).
+#
+# The agent image is built separately and is deliberately not a service — it
+# is not a long-running process but a throwaway container started per request
+# and destroyed afterwards:
+#
+#   docker build -t webagent/agent:latest agent/
+#
+# ---------------------------------------------------------------------------
+# THE DOCKER SOCKET IS ROOT ON THE HOST. READ THIS BEFORE RUNNING IT.
+# ---------------------------------------------------------------------------
+#
+# `/var/run/docker.sock` is mounted below because the application starts the
+# agent container for each request. Access to that socket is equivalent to
+# root on the host machine: anything that can talk to it can start a container
+# with the host filesystem mounted and as much privilege as it likes. Any
+# remote code execution in this application is therefore host compromise, not
+# container compromise.
+#
+# What this installation already does about it, in the application itself:
+#   - the agent container receives no GitHub token, no Netlify token and no
+#     git remote (contracts/repo-files.md), so the code that runs untrusted
+#     model output holds no credential and cannot push anywhere;
+#   - it runs with every capability dropped and `no-new-privileges`;
+#   - it is destroyed after every request, successful or not.
+#
+# That protects the repository from the agent. It does not protect the host
+# from this application. The hardening path, in the order worth taking it:
+#
+#   1. Put a socket proxy in front of the daemon (for example
+#      tecnativa/docker-socket-proxy) and give this service that proxy's
+#      address as DOCKER_HOST instead of the raw socket. Allow only the calls
+#      the runner actually makes — create, start, attach, wait, remove — and
+#      deny the rest of the API. This is the cheapest large improvement.
+#   2. Run the daemon rootless, so the socket's authority is a single
+#      unprivileged user's rather than root's.
+#   3. Run the agent workload on a separate host or VM from the interface, and
+#      give this service no path to a production daemon at all.
+#
+# None of these are configured here, because a default that quietly half-works
+# is worse than a default that states plainly what it is.
+
+services:
+  app:
+    # Built inline rather than from a Dockerfile of its own: the whole
+    # deployment is meant to be one file to read, and the application image is
+    # eight lines of it.
+    build:
+      context: .
+      # Requires Docker Compose v2.17 or newer.
+      dockerfile_inline: |
+        FROM node:22-slim
+        # git is the application's own tool, not the agent's: the host clones
+        # the mirror, checks out the working tree, and makes every commit.
+        # The agent image deliberately has no git at all.
+        RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+            && rm -rf /var/lib/apt/lists/*
+        WORKDIR /app
+        COPY package.json package-lock.json ./
+        RUN npm ci
+        COPY . .
+        RUN npm run build
+        EXPOSE 3000
+        CMD ["npm", "run", "start"]
+
+    # Secrets and the one site this install serves. Never baked into the
+    # image, and never read from the site's repository (FR-003d).
+    env_file:
+      - .env
+
+    environment:
+      # The state directory must resolve to the SAME absolute path inside this
+      # container and on the host. The application asks the host's daemon to
+      # bind-mount a working tree into the agent container, and that daemon
+      # resolves the path on the host, not in here — so a named volume, or a
+      # different path on either side, produces an agent container mounted on
+      # an empty directory and a request that changes nothing. Keep the two
+      # halves of the volume line below identical.
+      WEBAGENT_STATE_DIR: ${WEBAGENT_STATE_DIR:-/var/lib/webagent}
+      AGENT_IMAGE: ${AGENT_IMAGE:-webagent/agent:latest}
+      NODE_ENV: production
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${WEBAGENT_STATE_DIR:-/var/lib/webagent}:${WEBAGENT_STATE_DIR:-/var/lib/webagent}
+
+    ports:
+      - '${PORT:-3000}:3000'
+
+    # A restart brings the process back with no memory of what was running.
+    # That is by design: an interrupted request is reconstructed from the pull
+    # request it was writing to, and its lock is broken as stale by the next
+    # request (FR-009). Nothing is lost that was not ephemeral to begin with.
+    restart: unless-stopped

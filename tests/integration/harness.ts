@@ -7,6 +7,7 @@ import { createFakeRepoClient } from '@/lib/github/fake';
 import { createJobBus } from '@/lib/jobs/bus';
 import { createLock } from '@/lib/lock/lock';
 import { createFakeNetlifyClient } from '@/lib/netlify/fake';
+import { createFakeMailer } from '@/lib/notify/email';
 import { DEFAULT_POLICY } from '@/lib/policy/parse';
 import { createFakeRunner, type FakeRunnerScript } from '@/lib/runner/fake';
 import type { RunDeps } from '@/lib/jobs/run';
@@ -30,6 +31,8 @@ export interface Harness {
   bus: ReturnType<typeof createJobBus>;
   runner: ReturnType<typeof createFakeRunner>;
   lock: ReturnType<typeof createLock>;
+  /** Records the developer alerts a run raised, so a test can read them back. */
+  mailer: ReturnType<typeof createFakeMailer>;
   /** The bare repository the push lands in, standing in for GitHub. */
   originDir: string;
   /** Branches the mirror was asked for, in order. */
@@ -50,8 +53,13 @@ const ENV: Env = {
   openrouterApiKey: 'key',
   sessionSecret: 'a'.repeat(32),
   allowedEmails: ['jane@client.example'],
-  configPasswordHash: 'hash',
-  configTotpSecret: 'JBSWY3DPEHPK3PXP',
+  // A real argon2id hash of 'fixture-configuration-password' and a base32
+// secret long enough for TOTP. A fixture that would be rejected as unusable
+// describes an installation that could not start, which is not what these
+// tests mean by one.
+  configPasswordHash:
+    '$argon2id$v=19$m=65536,p=4,t=3$WkovnjhviO6+KrGuW0pGPw$aH1PI7KuDMSl14U1diMYqKyzdK6Uz9Vpxne+abvnzPk',
+  configTotpSecret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'webagent@client.example',
   publicBaseUrl: 'http://localhost:3000',
@@ -72,6 +80,12 @@ export interface HarnessOptions {
   script?: FakeRunnerScript;
   config?: RepoConfig;
   seedFiles?: Record<string, string>;
+  /**
+   * How long a test is willing to wait for a preview. The default is minutes,
+   * which is right for a real hosting provider and useless in a test that
+   * wants to see what happens when no deploy ever arrives.
+   */
+  previewTimeoutMs?: number;
 }
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
@@ -88,6 +102,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
   const bus = createJobBus();
   const runner = createFakeRunner(options.script ?? {});
   const lock = createLock(client);
+  const mailer = createFakeMailer();
 
   const checkouts: string[] = [];
   const trees: WorkingTree[] = [];
@@ -99,9 +114,11 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     runner,
     netlify,
     bus,
+    mailer,
     env: ENV,
     config: options.config ?? CONFIG,
     workRoot: root,
+    ...(options.previewTimeoutMs ? { previewTimeoutMs: options.previewTimeoutMs } : {}),
   };
 
   return {
@@ -111,6 +128,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     bus,
     runner,
     lock,
+    mailer,
     originDir,
     checkouts,
     trees,

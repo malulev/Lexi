@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import type { RepoClient } from '@/lib/github/types';
 import type { JobBus } from '@/lib/jobs/bus';
-import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
+import { CLIENT_MESSAGES, INTERRUPTED_MESSAGE } from '@/lib/jobs/messages';
 import { toClientProse } from '@/lib/jobs/client-prose';
 import { assemblePrompt } from '@/lib/jobs/prompt';
 import { waitForPreview } from '@/lib/jobs/preview';
@@ -15,6 +15,7 @@ import type { AcquireResult, LockHandle } from '@/lib/lock/lock';
 import { commitPermittedPaths, deriveChangeSet } from '@/lib/mirror/changeset';
 import type { Mirror, WorkingTree } from '@/lib/mirror/types';
 import type { NetlifyClient } from '@/lib/netlify';
+import type { Mailer } from '@/lib/notify/email';
 import { gate } from '@/lib/policy/gate';
 import { renderRecord } from '@/lib/record/record';
 import { writeControlDir } from '@/lib/runner/control';
@@ -54,10 +55,18 @@ export interface RunDeps {
   bus: JobBus;
   env: Env;
   config: RepoConfig;
+  /**
+   * Reaches the developer, not the client: the cost ceiling alert is the one
+   * thing this orchestrator sends on its own behalf (FR-014). Absent, a run
+   * still stops at the ceiling — it just goes unannounced.
+   */
+  mailer?: Mailer;
   /** Called once the request is finished, with the comment that recorded it. */
   onFinished?: (record: RequestRecord, commentId: number) => Promise<void>;
   now?: () => Date;
   workRoot?: string;
+  /** Overrides how long a preview is waited for. Tests need seconds, not minutes. */
+  previewTimeoutMs?: number;
 }
 
 export interface RunInput {
@@ -102,7 +111,7 @@ export async function beginRequest(deps: RunDeps, input: RunInput): Promise<Begi
 
   // A stale lock is broken rather than waited on, and the request it belonged to
   // is given the ending its own process never wrote.
-  if (!acquired.ok) await recordAbandoned(deps, input, acquired.brokenRequestId);
+  if (!acquired.ok) await recordAbandoned(deps, input, acquired);
 
   return { started: true, requestId, completed: execute(deps, input, requestId, acquired.handle) };
 }
@@ -161,6 +170,9 @@ async function execute(
     machine.advance('gating');
     const verdict = await judge(deps, tree, agent.cost);
     if (verdict.failure) {
+      if (verdict.failure.errorCode === 'cost_ceiling') {
+        await alertCostCeiling(deps, input, agent.cost.costUsd);
+      }
       machine.advance(verdict.failure.outcome === 'blocked' ? 'blocked' : 'failed');
       return finish(
         deps,
@@ -180,7 +192,7 @@ async function execute(
       {
         conversationNumber: input.conversationNumber,
         commitSha: commit.sha,
-        timeoutMs: PREVIEW_TIMEOUT_MS,
+        timeoutMs: deps.previewTimeoutMs ?? PREVIEW_TIMEOUT_MS,
       },
     );
 
@@ -500,10 +512,13 @@ async function finish(
  * sentence here. These are diagnostic, never shown to a client — the prose
  * beside the block is what a client reads (Principle I).
  */
-const DEFAULT_ERROR_DETAIL: Partial<Record<ErrorCode, string>> = {
+export const DEFAULT_ERROR_DETAIL: Record<ErrorCode, string> = {
   agent_timeout: 'the agent was still running when maxRequestMinutes elapsed and was killed',
   cost_ceiling: 'the run would have exceeded costCeilingUsd and was stopped before pushing',
   nothing_to_change: 'the agent exited successfully having modified no file in the working tree',
+  nothing_to_publish: 'approval was asked for a conversation with no successful preview to publish',
+  nothing_to_undo: 'undo was asked for a conversation that has nothing live to reverse',
+  site_moved_on: 'the default branch has advanced past the published commit, so a revert would take later work with it',
   site_unreachable: 'the hosting provider reported no deploy for this branch within the wait',
   request_in_flight: 'another request held the installation lock',
   blocked_by_policy: 'the change touched a path the policy does not permit',
@@ -574,6 +589,41 @@ async function discard(tree: WorkingTree | null, controlDir: string | null): Pro
 }
 
 /**
+ * Tells the developer their site spent more on one request than they allowed
+ * (FR-014).
+ *
+ * Addressed to `alertContact`, which is a developer rather than a client, so
+ * this is the one message in the job path that may carry the figures — the
+ * client's own sentence stays inside the closed vocabulary (Principle I).
+ *
+ * It cannot fail the request. The ceiling has already done the work that
+ * matters by stopping the push, and a mail server being down is no reason to
+ * report a different ending than the one that happened.
+ */
+async function alertCostCeiling(deps: RunDeps, input: RunInput, costUsd: number): Promise<void> {
+  const { alertContact, costCeilingUsd } = deps.config.settings;
+  if (!deps.mailer || !alertContact) return;
+
+  try {
+    await deps.mailer.send({
+      to: alertContact,
+      subject: 'Cost ceiling reached on a change request',
+      text: [
+        `A change request on ${deps.env.githubRepoOwner}/${deps.env.githubRepoName} was stopped ` +
+          `before it published anything: it cost $${costUsd}, and this site's ceiling ` +
+          `is $${costCeilingUsd}.`,
+        `Nothing was pushed. The conversation: ${deps.env.publicBaseUrl}/c/${input.conversationNumber}`,
+      ].join('\n\n'),
+    });
+  } catch (cause) {
+    console.error(
+      `[webagent] could not alert ${alertContact} that the cost ceiling was reached`,
+      cause,
+    );
+  }
+}
+
+/**
  * A request the previous process abandoned leaves a lock and no ending. The
  * process that breaks the lock writes the ending, because it is the only one
  * left that knows the request existed (FR-007c).
@@ -581,12 +631,16 @@ async function discard(tree: WorkingTree | null, controlDir: string | null): Pro
 async function recordAbandoned(
   deps: RunDeps,
   input: RunInput,
-  brokenRequestId: string | undefined,
+  broken: { brokenRequestId?: string; brokenStartedAt?: string },
 ): Promise<void> {
   const now = (deps.now ?? (() => new Date()))().toISOString();
   const record: RequestRecord = {
-    requestId: brokenRequestId ?? 'r_unknown',
-    startedAt: now,
+    requestId: broken.brokenRequestId ?? 'r_unknown',
+    // The lock commit names when its request began, and that is the only
+    // trace of the fact the dead process left anywhere. Falling back to now
+    // would report a request that ran for no time at all, which is a worse
+    // answer than an approximate one.
+    startedAt: broken.brokenStartedAt ?? now,
     finishedAt: now,
     outcome: 'abandoned',
     stages: [],
@@ -595,7 +649,7 @@ async function recordAbandoned(
   try {
     await deps.client.createComment(
       input.conversationNumber,
-      renderRecord('That request was interrupted before it finished. Nothing was published.', record),
+      renderRecord(INTERRUPTED_MESSAGE, record),
     );
   } catch {
     // Recording the abandonment is a courtesy to the conversation's history;

@@ -94,6 +94,41 @@ export async function notifyOnce(
   return { sent: true };
 }
 
+export interface PublicationNotice {
+  event: Extract<NotificationEvent, 'published' | 'undone'>;
+  conversation: { number: number; title: string };
+  commentId: number;
+  record: RequestRecord;
+  recipients: string[];
+}
+
+/**
+ * Announces a publish or an undo (FR-032), and never lets the announcement
+ * change the outcome of the act.
+ *
+ * `notifyOnce` rejects when the mail server refuses, which is right for a
+ * preview: the caller is a job that can record the failure and move on. It is
+ * wrong here. By the time this runs the client's website has already changed,
+ * and a route that answered with a failure because SMTP was down would be
+ * telling them nothing was published when something was. So the send is
+ * logged, not raised — the record's own `notified` list already keeps a retry
+ * from sending twice (OD-004), and the conversation shows the change either
+ * way.
+ */
+export async function notifyPublication(
+  deps: { mailer: Mailer; client: RepoClient; env: Env },
+  notice: PublicationNotice,
+): Promise<void> {
+  try {
+    await notifyOnce(deps, notice);
+  } catch (cause) {
+    console.error(
+      `[webagent] could not announce ${notice.event} on conversation ${notice.conversation.number}`,
+      cause,
+    );
+  }
+}
+
 /** The prose half of the comment being rewritten, so the rewrite leaves it untouched. */
 async function readProse(
   client: RepoClient,
