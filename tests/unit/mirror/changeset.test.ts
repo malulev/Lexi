@@ -4,7 +4,7 @@
 // filesystem calls, exactly as the agent does, so a mock's assumptions about
 // what `git status` reports can't paper over the real behaviour.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { simpleGit, type SimpleGit } from 'simple-git';
@@ -228,5 +228,32 @@ describe('commitPermittedPaths', () => {
     const { tree } = await makeFixture();
 
     await expect(commitPermittedPaths(tree, [], 'client: no-op', AUTHOR)).rejects.toThrow();
+  });
+
+  /**
+   * Git hooks are not this product's contract, and the working tree they would
+   * run in is a throwaway.
+   *
+   * They are also a way into the host. Hooks are never cloned, but a hook the
+   * host already has — a `pre-commit` from a global init template, say — reads
+   * its configuration from the repository being committed. That turns a file in
+   * the client's site repository into commands running on the host, outside the
+   * container everything else about this design goes to such lengths to
+   * contain. Committing must not consult them.
+   */
+  it('commits even where the host has installed a hook that refuses', async () => {
+    const { tree } = await makeFixture();
+    const hook = path.join(tree.dir, '.git', 'hooks', 'pre-commit');
+    await writeFile(hook, '#!/bin/sh\necho "refused by a hook the site repository configured" >&2\nexit 1\n');
+    await chmod(hook, 0o755);
+
+    await writeFile(path.join(tree.dir, 'existing.txt'), 'a\nb\nc\n');
+    const files: ChangedFile[] = [
+      { path: 'existing.txt', kind: 'modified', diffLines: 1 },
+    ];
+
+    const { sha } = await commitPermittedPaths(tree, files, 'client: extend the page', AUTHOR);
+
+    expect(sha).toMatch(/^[0-9a-f]{7,40}$/);
   });
 });

@@ -135,8 +135,15 @@ export async function commitPermittedPaths(
   await git.addConfig('commit.gpgsign', 'false');
 
   await git.add(files.map((file) => file.path));
+  // `--no-verify` because hooks are not this product's contract, and because
+  // they are a way into the host: a hook the host already has — a pre-commit
+  // from a global init template, say — reads its configuration from the
+  // repository being committed, which would turn a file in the client's site
+  // repository into commands running outside the container everything else
+  // here goes to such lengths to contain.
   const summary = await git.commit(message, undefined, {
     '--author': `${author.name} <${author.email}>`,
+    '--no-verify': null,
   });
   return { sha: summary.commit };
 }
