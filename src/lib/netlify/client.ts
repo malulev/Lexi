@@ -105,7 +105,11 @@ export function createNetlifyClient(env: Env, deps?: { fetch?: typeof fetch }): 
       );
     }
 
-    const publicUrl = parsed.data.url ?? parsed.data.ssl_url;
+    // https first: the two differ only by scheme, and this URL is handed to a
+    // client in an email and in the sentence confirming their change went live.
+    // Sending someone to a plain-http copy of their own website is not a link
+    // this product should ever produce.
+    const publicUrl = parsed.data.ssl_url ?? parsed.data.url;
     if (!publicUrl) {
       throw new Error(`Netlify site "${siteId}" has no public url on record.`);
     }

@@ -276,3 +276,45 @@ describe('createNetlifyClient · the nulls a live Netlify sends', () => {
     expect(found?.deployUrl).not.toBe('https://client.netlify.app');
   });
 });
+
+/**
+ * The link a client is handed to their own website.
+ *
+ * A live Netlify site carries both `url` and `ssl_url`, and they differ only by
+ * scheme — the first is plain http. Preferring it sends a client to an insecure
+ * copy of their own site from an email and from the sentence confirming their
+ * change went live. Observed in a real publish, where the confirmation read
+ * `http://…netlify.app`. The site fixture happened to hold https in both
+ * fields, so no test could see it.
+ */
+describe('createNetlifyClient · the site URL a client is given', () => {
+  it('prefers https when the provider offers both', async () => {
+    const client = createNetlifyClient(env, {
+      fetch: fakeFetch({
+        '/api/v1/sites/site_fixture': () =>
+          jsonResponse({
+            id: 'site_fixture',
+            url: 'http://client-site.netlify.app',
+            ssl_url: 'https://client-site.netlify.app',
+          }),
+      }),
+    });
+
+    const site = await client.getSite();
+
+    expect(site?.publicUrl).toBe('https://client-site.netlify.app');
+  });
+
+  it('falls back to the plain URL rather than offering nothing', async () => {
+    const client = createNetlifyClient(env, {
+      fetch: fakeFetch({
+        '/api/v1/sites/site_fixture': () =>
+          jsonResponse({ id: 'site_fixture', url: 'http://client-site.netlify.app' }),
+      }),
+    });
+
+    const site = await client.getSite();
+
+    expect(site?.publicUrl).toBe('http://client-site.netlify.app');
+  });
+});
