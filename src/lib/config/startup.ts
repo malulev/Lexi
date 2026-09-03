@@ -177,18 +177,32 @@ export async function assertStartupValid(deps?: StartupDeps): Promise<void> {
 }
 
 /**
- * A minter of its own, because the repository client keeps its own private
- * one. It performs the same token exchange against the same credentials, so
- * an App that cannot mint here cannot mint for a job either — the only thing
- * not shared is the cache, which costs one extra exchange at boot.
+ * Builds only what is being validated, rather than reaching for the
+ * installation.
+ *
+ * The installation is the composition root and constructs the container runtime
+ * along with everything else. Nothing here validates that runtime, and pulling
+ * it in has a cost that is not merely wasteful: this module is reached from the
+ * instrumentation hook, which Next compiles for every runtime it targets, and
+ * the container client's dependencies bottom out in a native binary that cannot
+ * be bundled for a browser. Importing the installation here failed the client
+ * build outright and made every page answer 500.
+ *
+ * The minter is its own for a related reason — the repository client keeps a
+ * private one. It performs the same exchange against the same credentials, so
+ * an App that cannot mint here cannot mint for a job either; only the cache is
+ * unshared, which costs one extra exchange at boot.
  */
 async function buildStartupDeps(): Promise<StartupDeps> {
-  const { getInstallation } = await import('@/lib/installation');
-  const installation = getInstallation();
+  const { loadEnv } = await import('./env');
+  const { createRepoClient } = await import('@/lib/github/client');
+  const { createNetlifyClient } = await import('@/lib/netlify');
+
+  const env = loadEnv();
   return {
-    env: installation.env,
-    client: installation.client,
-    netlify: installation.netlify,
-    tokens: createTokenMinter(installation.env),
+    env,
+    client: createRepoClient(env),
+    netlify: createNetlifyClient(env),
+    tokens: createTokenMinter(env),
   };
 }
