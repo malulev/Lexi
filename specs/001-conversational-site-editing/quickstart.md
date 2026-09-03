@@ -8,9 +8,11 @@ Implementation detail belongs in `tasks.md`; this is the run-and-verify guide.
 - A client site in a GitHub repository, deploying to Netlify with **Deploy Previews enabled**
   for pull requests. Verify this first — without it there is no preview and nothing to approve.
 - Docker and Docker Compose on the host.
-- A GitHub App installed on that one repository, with read and write on contents and pull
-  requests. Note the App ID, private key, and installation ID.
-- A Netlify personal access token and the site ID.
+- A GitHub App installed on that one repository, with read and write on **contents** and **pull
+  requests** and nothing else, and its **webhook unchecked** — this product does not receive
+  GitHub webhooks. Note the App ID, private key, and installation ID.
+- A Netlify personal access token and the site ID. The token is account-wide: Netlify has no
+  per-site scoping, so treat it accordingly.
 - An OpenRouter API key.
 - SMTP credentials for notification email.
 
@@ -20,7 +22,14 @@ Secrets go in the environment; settings go in the client's repository.
 
 ```bash
 cp .env.example .env
+npm run gen:secrets -- --password '<a configuration password you pick>' >> .env
 ```
+
+`gen:secrets` mints `SESSION_SECRET`, `NETLIFY_WEBHOOK_SECRET`, `CONFIG_PASSWORD_HASH` and
+`CONFIG_TOTP_SECRET`. Write them with it rather than by hand: **a dotenv file expands `$NAME`
+references, and quoting does not stop it**, so an argon2 hash pasted in raw arrives gutted —
+`$argon2id$v=19$m=...` becomes `=19=65536,...`. It still looks like a secret, and the only thing
+that notices is startup validation. The generator escapes what it emits.
 
 ```bash
 # .env — secrets and the one site this install serves
@@ -38,7 +47,23 @@ CONFIG_PASSWORD_HASH=...      # argon2 hash
 CONFIG_TOTP_SECRET=...
 SMTP_URL=...
 PUBLIC_BASE_URL=https://edit.client.example
+WEBAGENT_STATE_DIR=/var/lib/webagent   # must be writable; see below
 ```
+
+`WEBAGENT_STATE_DIR` holds the git mirror and the throwaway working trees. Its default is
+`/var/lib/webagent`, which a development host cannot write to, and the failure surfaces
+mid-request rather than at startup. Under Docker Compose it must be the **same absolute path**
+on the host and in the container, because the host's Docker daemon resolves the agent
+container's bind mounts.
+
+Then check it before starting anything:
+
+```bash
+npm run check:env
+```
+
+It names every variable that is missing, malformed, or present but empty, and prints no
+values.
 
 In the **client's repository**, commit:
 
@@ -56,8 +81,15 @@ allow: ["src/components/**", "src/content/**", "public/images/**"]
 maxFilesChanged: 15
 ```
 
-Add a Netlify outgoing webhook for deploy started, succeeded, and failed, pointing at
-`$PUBLIC_BASE_URL/api/webhooks/netlify`.
+**Optional.** Add a Netlify outgoing webhook for deploy started, succeeded, and failed, pointing
+at `$PUBLIC_BASE_URL/api/webhooks/netlify`, using `NETLIFY_WEBHOOK_SECRET`. The loop does not
+need it: the orchestrator also polls Netlify for the deploy, so a preview arrives with or without
+it — the webhook only makes it arrive a few seconds sooner. Skip it while `PUBLIC_BASE_URL` is
+not yet reachable from the internet.
+
+Confirm **Deploy Previews** are enabled on the Netlify site before going further. Without them
+the request runs, the gate passes, the branch pushes, and then the wait for a preview simply
+times out — the failure looks like a fault in this product rather than a missing setting.
 
 ## Run
 
@@ -110,6 +142,26 @@ marked published with no approval control remaining.
 
 Press Undo. Expect the public site back to its prior content within 3 minutes, and the revert
 present in the repository — not just a rolled-back deploy.
+
+Then confirm both acts left a trace a developer can audit (FR-031). The conversation's own
+history is the client's view; this is the other one:
+
+```bash
+gh pr view 1 --json merged,mergedAt
+gh api repos/:owner/:repo/commits?sha=main --jq '.[0:3][] | .sha[0:8] + "  " + (.commit.message | split("\n")[0])'
+```
+
+Expect the pull request marked merged, and the default branch carrying a revert commit above the
+merge commit. A confirmed run looks like this:
+
+```text
+6ba34b30  Revert changes introduced by fda335aa...
+fda335aa  Merge pull request #1 from <owner>/webagent/c-2
+```
+
+Two commits, in that order, is the whole point: undo is a commit that reverses a commit, so the
+history says what happened and when. A hosting rollback would leave the repository claiming the
+change is still live.
 
 ### 6. Single-flight is enforced server-side (FR-007b)
 

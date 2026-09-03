@@ -170,16 +170,16 @@ is written to the repository and the client sees a clear blocked message.
 
 ### Tests
 
-- [ ] T067 [P] [US3] Write a failing integration test in `tests/integration/policy-block.test.ts` asserting a violating run pushes no branch and creates no commit, and that the record carries `blocked` with the offending path
-- [ ] T068 [P] [US3] Write a failing integration test in the same file asserting a request to modify `.webagent/policy.yml` is refused even when the site policy allows that path
+- [X] T067 [P] [US3] Write a failing integration test in `tests/integration/policy-block.test.ts` asserting a violating run pushes no branch and creates no commit, and that the record carries `blocked` with the offending path
+- [X] T068 [P] [US3] Write a failing integration test in the same file asserting a request to modify `.webagent/policy.yml` is refused even when the site policy allows that path
 
 ### Implementation
 
-- [ ] T069 [US3] Wire site-declared policy loading into the orchestrator in `src/lib/jobs/run.ts`, discarding the working tree on violation
-- [ ] T069a [P] [US3] Write a failing test in `tests/integration/policy-block.test.ts` asserting that no control file and no agent scratch file appears in any commit, whatever the agent leaves in the working tree
-- [ ] T070 [US3] Implement blocked-outcome rendering in `src/lib/record/record.ts` carrying `violation` and `blockedPath`
-- [ ] T071 [US3] Map violations to client-facing language in `src/lib/jobs/messages.ts` per the error vocabulary in contracts/http-api.md
-- [ ] T072 [P] [US3] Inject `AGENTS.md` guidance into the prompt in `src/lib/jobs/prompt.ts` (FR-020)
+- [X] T069 [US3] Wire site-declared policy loading into the orchestrator in `src/lib/jobs/run.ts`, discarding the working tree on violation
+- [X] T069a [P] [US3] Write a failing test in `tests/integration/policy-block.test.ts` asserting that no control file and no agent scratch file appears in any commit, whatever the agent leaves in the working tree
+- [X] T070 [US3] Implement blocked-outcome rendering in `src/lib/record/record.ts` carrying `violation` and `blockedPath`
+- [X] T071 [US3] Map violations to client-facing language in `src/lib/jobs/messages.ts` per the error vocabulary in contracts/http-api.md
+- [X] T072 [P] [US3] Inject `AGENTS.md` guidance into the prompt in `src/lib/jobs/prompt.ts` (FR-020)
 
 **Checkpoint**: The gate is load-bearing and demonstrated.
 
@@ -194,16 +194,16 @@ undo, confirm the public site returns to its prior content.
 
 ### Tests
 
-- [ ] T073 [P] [US2] Write failing integration tests in `tests/integration/approve.test.ts`: approval merges; approval is refused with `409` when no successful preview exists; approval is refused when the branch is out of date (FR-030)
-- [ ] T074 [P] [US2] Write a failing integration test in `tests/integration/undo.test.ts` asserting undo creates a revert on the default branch, not merely a hosting rollback
+- [X] T073 [P] [US2] Write failing integration tests in `tests/integration/approve.test.ts`: approval merges; approval is refused with `409` when no successful preview exists; approval is refused when the branch is out of date (FR-030)
+- [X] T074 [P] [US2] Write a failing integration test in `tests/integration/undo.test.ts` asserting undo creates a revert on the default branch, not merely a hosting rollback
 
 ### Implementation
 
-- [ ] T075 [US2] Implement staleness detection against the default branch in `src/lib/github/staleness.ts`
-- [ ] T076 [US2] Implement `POST /api/conversations/[number]/approve` in `src/app/api/conversations/[number]/approve/route.ts`
-- [ ] T077 [US2] Implement `POST /api/conversations/[number]/undo` in `src/app/api/conversations/[number]/undo/route.ts`
-- [ ] T078 [US2] Add approval and undo controls to `src/app/(client)/c/[number]/page.tsx`, offering approval only with a successful preview and hiding it once published (FR-027)
-- [ ] T079 [P] [US2] Add publish-complete and undo-complete notifications in `src/lib/notify/email.ts`
+- [X] T075 [US2] Implement staleness detection against the default branch in `src/lib/github/staleness.ts`
+- [X] T076 [US2] Implement `POST /api/conversations/[number]/approve` in `src/app/api/conversations/[number]/approve/route.ts`
+- [X] T077 [US2] Implement `POST /api/conversations/[number]/undo` in `src/app/api/conversations/[number]/undo/route.ts`
+- [X] T078 [US2] Add approval and undo controls to `src/app/(client)/c/[number]/page.tsx`, offering approval only with a successful preview and hiding it once published (FR-027)
+- [X] T079 [P] [US2] Add publish-complete and undo-complete notifications in `src/lib/notify/email.ts`
 
 **Checkpoint**: The full loop is client-operable.
 
@@ -218,16 +218,16 @@ test site, sign in as the configured client, and complete a change request.
 
 ### Tests
 
-- [ ] T080 [P] [US4] Write failing tests in `tests/integration/startup.test.ts` asserting startup fails with a specific, actionable message for each of: unreachable repository, missing installation, and unreachable hosting site (FR-003b)
-- [ ] T081 [P] [US4] Write failing tests in `tests/unit/auth/config-credential.test.ts` for password verification and time-based code verification, including rejection of a valid password with a wrong code
+- [X] T080 [P] [US4] Write failing tests in `tests/integration/startup.test.ts` asserting startup fails with a specific, actionable message for each of: unreachable repository, missing installation, and unreachable hosting site (FR-003b)
+- [X] T081 [P] [US4] Write failing tests in `tests/unit/auth/config-credential.test.ts` for password verification and time-based code verification, including rejection of a valid password with a wrong code
 
 ### Implementation
 
-- [ ] T082 [US4] Implement startup validation in `src/lib/config/startup.ts`, refusing to serve on any invalid setting
-- [ ] T083 [US4] Implement the configuration credential in `src/lib/auth/config-credential.ts` using argon2 and otplib (FR-003a, R6)
-- [ ] T084 [US4] Build the configuration surface in `src/app/(config)/settings/page.tsx`, read-only over repository settings, showing effective policy and any settings fault
-- [ ] T085 [P] [US4] Write `docker-compose.yml` with the application, the Docker socket mount, and a note recording the socket's root-equivalence and the hardening path
-- [ ] T086 [P] [US4] Write `README.md` installation instructions matching quickstart.md, including the Deploy Previews prerequisite and the Netlify webhook setup
+- [X] T082 [US4] Implement startup validation in `src/lib/config/startup.ts`, refusing to serve on any invalid setting
+- [X] T083 [US4] Implement the configuration credential in `src/lib/auth/config-credential.ts` using argon2 and otplib (FR-003a, R6)
+- [X] T084 [US4] Build the configuration surface in `src/app/(config)/settings/page.tsx`, read-only over repository settings, showing effective policy and any settings fault
+- [X] T085 [P] [US4] Write `docker-compose.yml` with the application, the Docker socket mount, and a note recording the socket's root-equivalence and the hardening path
+- [X] T086 [P] [US4] Write `README.md` installation instructions matching quickstart.md, including the Deploy Previews prerequisite and the Netlify webhook setup
 
 ---
 
@@ -240,30 +240,30 @@ confirm three distinct plain-language messages and a still-usable conversation.
 
 ### Tests
 
-- [ ] T087 [P] [US5] Write failing integration tests in `tests/integration/failures.test.ts` for agent timeout, build failure, unreachable hosting, cost ceiling, and empty diff — each producing its own vocabulary entry and leaving the public site unchanged (FR-034)
-- [ ] T088 [P] [US5] Write a failing test in `tests/integration/recovery.test.ts` asserting that a request abandoned by a process restart is recorded as abandoned when the stale lock is broken, and that the conversation renders it as interrupted
+- [X] T087 [P] [US5] Write failing integration tests in `tests/integration/failures.test.ts` for agent timeout, build failure, unreachable hosting, cost ceiling, and empty diff — each producing its own vocabulary entry and leaving the public site unchanged (FR-034)
+- [X] T088 [P] [US5] Write a failing test in `tests/integration/recovery.test.ts` asserting that a request abandoned by a process restart is recorded as abandoned when the stale lock is broken, and that the conversation renders it as interrupted
 
 ### Implementation
 
-- [ ] T089 [US5] Implement the failure taxonomy and its client-facing vocabulary in `src/lib/jobs/messages.ts`
-- [ ] T090 [US5] Implement cost-ceiling enforcement and the alert to the configured contact in `src/lib/jobs/run.ts` (FR-014)
-- [ ] T091 [US5] Feed preview build failure detail into the next request's prompt in `src/lib/jobs/prompt.ts` (FR-023)
-- [ ] T092 [US5] Implement stale-lock recovery writing an `abandoned` record in `src/lib/lock/lock.ts`
-- [ ] T093 [US5] Handle the empty-diff case in `src/lib/jobs/run.ts`, reporting that nothing needed changing and creating no pull request
+- [X] T089 [US5] Implement the failure taxonomy and its client-facing vocabulary in `src/lib/jobs/messages.ts`
+- [X] T090 [US5] Implement cost-ceiling enforcement and the alert to the configured contact in `src/lib/jobs/run.ts` (FR-014)
+- [X] T091 [US5] Feed preview build failure detail into the next request's prompt in `src/lib/jobs/prompt.ts` (FR-023)
+- [X] T092 [US5] Implement stale-lock recovery writing an `abandoned` record in `src/lib/lock/lock.ts`
+- [X] T093 [US5] Handle the empty-diff case in `src/lib/jobs/run.ts`, reporting that nothing needed changing and creating no pull request
 
 ---
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T094 [P] Write the end-to-end journey `tests/e2e/request-to-preview.spec.ts` against a fixture site, asserting the production URL is unchanged once the preview is ready (FR-024)
-- [ ] T095 [P] Write the end-to-end journey `tests/e2e/approve-and-undo.spec.ts`
-- [ ] T096 [P] Add timing assertions to the end-to-end journeys: first feedback within 10 seconds and a stage update within 60 (SC-003), request to preview within 4 minutes (SC-002), and undo complete within 3 minutes (SC-007)
-- [ ] T097 [P] Audit every client-facing string against Principle I in `tests/unit/messages.test.ts`, asserting no file paths, diffs, or build logs appear in the vocabulary
-- [ ] T097a [P] Write a test in `tests/unit/config/secrets.test.ts` asserting the settings schema accepts no secret-shaped field, so a secret committed to the site's repository is rejected rather than honoured (FR-003d)
-- [ ] T097b [P] Add a quickstart validation step confirming the approval and undo are visible in the pull request timeline and git history after publishing (FR-031)
-- [ ] T098 Confirm the gate module imports neither `dockerode` nor any network client, enforced by a lint rule in `eslint.config.mjs`
-- [ ] T099 [P] Record a real Netlify deploy payload into `tests/fixtures/netlify/` and reconcile the correlation fields with R4's assumption
-- [ ] T100 Walk quickstart.md end to end on a clean host and correct any step that does not work verbatim
+- [X] T094 [P] Write the end-to-end journey `tests/e2e/request-to-preview.spec.ts` against a fixture site, asserting the production URL is unchanged once the preview is ready (FR-024)
+- [X] T095 [P] Write the end-to-end journey `tests/e2e/approve-and-undo.spec.ts`
+- [X] T096 [P] Add timing assertions to the end-to-end journeys: first feedback within 10 seconds and a stage update within 60 (SC-003), request to preview within 4 minutes (SC-002), and undo complete within 3 minutes (SC-007)
+- [X] T097 [P] Audit every client-facing string against Principle I in `tests/unit/messages.test.ts`, asserting no file paths, diffs, or build logs appear in the vocabulary
+- [X] T097a [P] Write a test in `tests/unit/config/secrets.test.ts` asserting the settings schema accepts no secret-shaped field, so a secret committed to the site's repository is rejected rather than honoured (FR-003d)
+- [X] T097b [P] Add a quickstart validation step confirming the approval and undo are visible in the pull request timeline and git history after publishing (FR-031)
+- [X] T098 Confirm the gate module imports neither `dockerode` nor any network client, enforced by a lint rule in `eslint.config.mjs`
+- [X] T099 [P] Record a real Netlify deploy payload into `tests/fixtures/netlify/` and reconcile the correlation fields with R4's assumption
+- [~] T100 Walk quickstart.md end to end on a clean host and correct any step that does not work verbatim — corrected against a real installation (state directory, dotenv expansion of the argon2 hash, the webhook being optional, App permissions, the Deploy Previews failure mode, the helper scripts). A genuinely clean host has not been used, so the remaining risk is a step that only a first-time machine would trip.
 
 ---
 
