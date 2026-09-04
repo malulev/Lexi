@@ -16,3 +16,12 @@ export type { JobRunner, RunOutcome, RunRequest, RunResult } from './types';
 export { createFakeRunner, type FakeRunnerScript } from './fake';
 export { createDockerRunner, type CreateDockerRunnerOptions } from './docker';
 export { assertControlDirOutsideWorkDir, readAgentResult, writeControlDir } from './control';
+export {
+  AGENT_LABEL,
+  countRunningAgents,
+  createDockerSlots,
+  UNLIMITED_SLOTS,
+  type AgentSlots,
+  type CreateDockerSlotsOptions,
+  type SlotOutcome,
+} from './slots';
