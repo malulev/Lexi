@@ -90,13 +90,13 @@ describe('a request on a full host', () => {
     expect(begun.started).toBe(true);
     if (!begun.started) throw new Error('the request should have started');
 
-    const events: JobEvent[] = [];
-    harness.bus.subscribe(begun.requestId, (event) => events.push(event));
-
     await begun.completed;
 
+    // Subscribing after `beginRequest` can miss events published before its
+    // first suspension (execute runs synchronously that far), so the durable
+    // history is read instead — the same remedy stream.test.ts uses.
     expect(slots.waits).toBe(1);
-    const stages = stagesSeen(events);
+    const stages = stagesSeen(harness.bus.history(begun.requestId));
     expect(stages.indexOf('queued')).toBeGreaterThan(-1);
     expect(stages.indexOf('queued')).toBeLessThan(stages.indexOf('running'));
     expect(harness.runner.calls).toHaveLength(1);
@@ -139,11 +139,12 @@ describe('a request on a full host', () => {
     expect(begun.started).toBe(true);
     if (!begun.started) throw new Error('the request should have started');
 
-    const events: JobEvent[] = [];
-    harness.bus.subscribe(begun.requestId, (event) => events.push(event));
-
     await begun.completed;
 
-    expect(stagesSeen(events)).not.toContain('queued');
+    const stages = stagesSeen(harness.bus.history(begun.requestId));
+    // A negative assertion needs a positive one beside it, or it passes on an
+    // empty history that never ran anything at all.
+    expect(stages).toContain('running');
+    expect(stages).not.toContain('queued');
   });
 });
