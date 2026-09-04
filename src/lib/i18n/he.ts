@@ -69,6 +69,7 @@ export const he: Dictionary = {
   stages: {
     change: {
       starting: 'מתחילים',
+      queued: 'ממתינים לתור פנוי',
       running: 'מבצעים את השינוי',
       gating: 'בודקים שזה מותר',
       pushing: 'שומרים את השינוי שלכם',
@@ -80,6 +81,7 @@ export const he: Dictionary = {
     },
     publish: {
       starting: 'מתחילים',
+      queued: 'ממתינים לתור פנוי',
       running: 'מפרסמים',
       gating: 'בודקים שבטוח לפרסם',
       pushing: 'מפרסמים את השינוי שלכם',
@@ -91,6 +93,7 @@ export const he: Dictionary = {
     },
     undo: {
       starting: 'מתחילים',
+      queued: 'ממתינים לתור פנוי',
       running: 'מבטלים',
       gating: 'בודקים שבטוח לבטל',
       pushing: 'מחזירים את השינוי',
@@ -110,6 +113,7 @@ export const he: Dictionary = {
     lines: {
       change: {
         starting: ['מפשילים שרוולים', 'מאתרים את האתר שלכם', 'מעמידים קומקום'],
+        queued: ['עוזרים קודם למישהו אחר', 'שומרים לכם את המקום בתור', 'התור שלכם מתקרב'],
         running: [
           'קוראים את האתר שלכם מלמעלה למטה',
           'בוחרים מילים בקפידה',

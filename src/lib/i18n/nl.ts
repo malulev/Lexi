@@ -69,6 +69,7 @@ export const nl: Dictionary = {
   stages: {
     change: {
       starting: 'Aan de slag',
+      queued: 'Wachten op een vrije beurt',
       running: 'Wijziging wordt gemaakt',
       gating: 'Controleren of het mag',
       pushing: 'Je wijziging wordt opgeslagen',
@@ -80,6 +81,7 @@ export const nl: Dictionary = {
     },
     publish: {
       starting: 'Aan de slag',
+      queued: 'Wachten op een vrije beurt',
       running: 'Publiceren',
       gating: 'Controleren of publiceren veilig is',
       pushing: 'Je wijziging wordt gepubliceerd',
@@ -91,6 +93,7 @@ export const nl: Dictionary = {
     },
     undo: {
       starting: 'Aan de slag',
+      queued: 'Wachten op een vrije beurt',
       running: 'Terugdraaien',
       gating: 'Controleren of terugdraaien veilig is',
       pushing: 'De wijziging wordt teruggedraaid',
@@ -110,6 +113,11 @@ export const nl: Dictionary = {
     lines: {
       change: {
         starting: ['Mouwen opstropen', 'Je website opzoeken', 'Even koffie zetten'],
+        queued: [
+          'Iemand anders wordt eerst geholpen',
+          'Je plek in de rij wordt vastgehouden',
+          'Je beurt komt eraan',
+        ],
         running: [
           'Je website lezen, van boven tot onder',
           'Woorden zorgvuldig kiezen',

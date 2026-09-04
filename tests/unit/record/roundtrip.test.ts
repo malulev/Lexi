@@ -76,7 +76,7 @@ function genProse(rng: () => number): string {
 }
 
 const STAGES: Stage[] = [
-  'starting', 'running', 'gating', 'pushing', 'building', 'succeeded', 'blocked', 'failed', 'abandoned',
+  'starting', 'queued', 'running', 'gating', 'pushing', 'building', 'succeeded', 'blocked', 'failed', 'abandoned',
 ];
 const OUTCOMES: Outcome[] = ['succeeded', 'blocked', 'failed', 'abandoned'];
 const VIOLATIONS: PolicyViolation[] = [

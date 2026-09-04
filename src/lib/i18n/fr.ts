@@ -69,6 +69,7 @@ export const fr: Dictionary = {
   stages: {
     change: {
       starting: 'Démarrage',
+      queued: 'En attente d’un tour libre',
       running: 'Modification en cours',
       gating: 'Vérification que c’est autorisé',
       pushing: 'Enregistrement de votre modification',
@@ -80,6 +81,7 @@ export const fr: Dictionary = {
     },
     publish: {
       starting: 'Démarrage',
+      queued: 'En attente d’un tour libre',
       running: 'Publication',
       gating: 'Vérification que la publication est sûre',
       pushing: 'Publication de votre modification',
@@ -91,6 +93,7 @@ export const fr: Dictionary = {
     },
     undo: {
       starting: 'Démarrage',
+      queued: 'En attente d’un tour libre',
       running: 'Annulation',
       gating: 'Vérification que l’annulation est sûre',
       pushing: 'Retrait de la modification',
@@ -113,6 +116,11 @@ export const fr: Dictionary = {
           'On retrousse les manches',
           'On cherche votre site',
           'On met la bouilloire en route',
+        ],
+        queued: [
+          'Quelqu’un d’autre est servi en premier',
+          'Votre place dans la file est gardée',
+          'Votre tour arrive',
         ],
         running: [
           'On lit votre site de haut en bas',

@@ -35,6 +35,7 @@ const SEPARATOR = '\n\n';
 
 const STAGE_VALUES: Stage[] = [
   'starting',
+  'queued',
   'running',
   'gating',
   'pushing',

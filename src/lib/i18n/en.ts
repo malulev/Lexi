@@ -87,6 +87,7 @@ export const en: Dictionary = {
   stages: {
     change: {
       starting: 'Getting started',
+      queued: 'Waiting for a free turn',
       running: 'Making the change',
       gating: "Checking it's allowed",
       pushing: 'Saving your change',
@@ -98,6 +99,7 @@ export const en: Dictionary = {
     },
     publish: {
       starting: 'Getting started',
+      queued: 'Waiting for a free turn',
       running: 'Publishing',
       gating: "Checking it's safe to publish",
       pushing: 'Publishing your change',
@@ -109,6 +111,7 @@ export const en: Dictionary = {
     },
     undo: {
       starting: 'Getting started',
+      queued: 'Waiting for a free turn',
       running: 'Undoing',
       gating: "Checking it's safe to undo",
       pushing: 'Taking the change back',
@@ -128,6 +131,11 @@ export const en: Dictionary = {
     lines: {
       change: {
         starting: ['Rolling up sleeves', 'Finding your website', 'Putting the kettle on'],
+        queued: [
+          'Someone else is being helped first',
+          'Holding your place in line',
+          'Your turn is coming',
+        ],
         running: [
           'Reading your website, top to bottom',
           'Choosing words carefully',

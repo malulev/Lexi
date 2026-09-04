@@ -137,6 +137,8 @@ export type GateResult =
 
 export type Stage =
   | 'starting'
+  /** Waiting for a free agent slot on a shared host. Absent when one was free at once. */
+  | 'queued'
   | 'running'
   | 'gating'
   | 'pushing'

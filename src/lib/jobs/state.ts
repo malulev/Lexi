@@ -1,6 +1,6 @@
 /**
  * The request stage machine (data-model.md's Request entity). Legal path:
- * `starting -> running -> gating -> pushing -> building -> succeeded`, with
+ * `starting -> (queued ->) running -> gating -> pushing -> building -> succeeded`, with
  * `blocked` reachable only from `gating`, and `failed` reachable from any
  * non-terminal stage. Nothing advances out of a terminal stage.
  *
@@ -21,7 +21,8 @@ import type { Stage, StageEvent } from '@/types';
 export const TERMINAL_STAGES: readonly Stage[] = ['succeeded', 'blocked', 'failed', 'abandoned'];
 
 const LEGAL_NEXT: Record<Stage, readonly Stage[]> = {
-  starting: ['running', 'abandoned'],
+  starting: ['queued', 'running', 'abandoned'],
+  queued: ['running'],
   running: ['gating'],
   gating: ['pushing', 'blocked'],
   pushing: ['building'],

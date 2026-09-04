@@ -88,8 +88,9 @@ Ephemeral while running; durable only as its record.
 | live output | in memory, streamed, discarded |
 | outcome, extent, cost | written to the durable record on exit |
 
-Stages: `starting → running → gating → pushing → building → succeeded`, with `blocked` from
-gating, and `failed` from any stage. Every terminal stage releases the lock and writes a record.
+Stages: `starting → (queued →) running → gating → pushing → building → succeeded`, with `blocked` from
+gating, `failed` from any stage, and `queued` present only when the host had no free agent slot
+when the request was ready to run. Every terminal stage releases the lock and writes a record.
 
 ### Request Record
 

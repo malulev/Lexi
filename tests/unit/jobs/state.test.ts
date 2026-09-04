@@ -16,6 +16,9 @@ import type { JobEvent, Stage } from '@/types';
 describe('isLegalTransition', () => {
   const legal: Array<[Stage, Stage]> = [
     ['starting', 'running'],
+    ['starting', 'queued'],
+    ['queued', 'running'],
+    ['queued', 'failed'],
     ['running', 'gating'],
     ['gating', 'pushing'],
     ['gating', 'blocked'],
@@ -34,9 +37,12 @@ describe('isLegalTransition', () => {
     ['starting', 'pushing'],
     ['starting', 'building'],
     ['starting', 'succeeded'],
+    ['queued', 'gating'],
+    ['queued', 'abandoned'],
     ['running', 'blocked'],
     ['running', 'abandoned'],
     ['running', 'pushing'],
+    ['running', 'queued'],
     ['gating', 'succeeded'],
     ['gating', 'abandoned'],
     ['gating', 'gating'],
