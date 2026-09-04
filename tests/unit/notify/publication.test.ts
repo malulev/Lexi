@@ -38,7 +38,8 @@ const ENV: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'no-reply@example.com',
   publicBaseUrl: 'https://client.example.com',
-  maxConcurrentRuns: 2,};
+  maxConcurrentRuns: 2,
+};
 
 /** A conversation carrying one publication record, as the approve route leaves it. */
 async function conversationWithPublication(kind: 'publish' | 'undo') {
@@ -59,7 +60,12 @@ async function conversationWithPublication(kind: 'publish' | 'undo') {
     renderRecord(publicationProse({ kind, actor: 'client@example.com' }), record),
   );
 
-  return { client, conversation: { number: pullRequest.number, title: pullRequest.title }, comment, record };
+  return {
+    client,
+    conversation: { number: pullRequest.number, title: pullRequest.title },
+    comment,
+    record,
+  };
 }
 
 function notice(
@@ -121,7 +127,10 @@ describe('notifyPublication', () => {
     // The change is already live by the time this runs. Raising here would
     // answer the client with a failure for something that succeeded.
     await expect(
-      notifyPublication({ mailer: brokenMailer, client: built.client, env: ENV }, notice('published', built)),
+      notifyPublication(
+        { mailer: brokenMailer, client: built.client, env: ENV },
+        notice('published', built),
+      ),
     ).resolves.toBeUndefined();
   });
 });

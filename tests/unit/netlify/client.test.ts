@@ -25,7 +25,8 @@ const env: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'webagent@client.example',
   publicBaseUrl: 'http://localhost:3000',
-  maxConcurrentRuns: 2,};
+  maxConcurrentRuns: 2,
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

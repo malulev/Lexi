@@ -34,14 +34,17 @@ const ENV: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'webagent@client.example',
   publicBaseUrl: 'http://localhost:3000',
-  maxConcurrentRuns: 2,};
+  maxConcurrentRuns: 2,
+};
 
 /**
  * A mirror that does what a test tells it: no git, because the git half is
  * proven in tests/unit/mirror/mirror.test.ts and the integration suite. What
  * matters here is what publishing does with each answer.
  */
-function fakeMirror(outcome: UpToDateOutcome = { kind: 'current' }): Mirror & { calls: string[]; synced: number } {
+function fakeMirror(
+  outcome: UpToDateOutcome = { kind: 'current' },
+): Mirror & { calls: string[]; synced: number } {
   const calls: string[] = [];
   const mirror = {
     calls,
@@ -61,7 +64,15 @@ function fakeMirror(outcome: UpToDateOutcome = { kind: 'current' }): Mirror & { 
 }
 
 function fakeTree(): WorkingTree & { disposed: number } {
-  const tree = { dir: '/nowhere', branch: 'webagent/c-1', baseSha: 'x', disposed: 0, async dispose() { tree.disposed += 1; } };
+  const tree = {
+    dir: '/nowhere',
+    branch: 'webagent/c-1',
+    baseSha: 'x',
+    disposed: 0,
+    async dispose() {
+      tree.disposed += 1;
+    },
+  };
   return tree;
 }
 
@@ -125,7 +136,14 @@ async function previewed(client: ReturnType<typeof createFakeRepoClient>): Promi
 }
 
 function productionDeploy(commitSha: string, state: Deploy['state']): Deploy {
-  return { id: `d-${commitSha}`, state, context: 'production', commitRef: commitSha, deployUrl: 'https://client.example', createdAt: '2026-09-02T10:05:00Z' };
+  return {
+    id: `d-${commitSha}`,
+    state,
+    context: 'production',
+    commitRef: commitSha,
+    deployUrl: 'https://client.example',
+    createdAt: '2026-09-02T10:05:00Z',
+  };
 }
 
 function stagesOf(events: JobEvent[]): string[] {
@@ -138,10 +156,16 @@ describe('publishing', () => {
     const number = await previewed(w.client);
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane@client.example' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane@client.example',
+    });
     if (!begun.ok) throw new Error(`should have begun: ${begun.reason}`);
 
-    expect(w.announced).toEqual([{ conversationNumber: number, requestId: begun.requestId, kind: 'publish' }]);
+    expect(w.announced).toEqual([
+      { conversationNumber: number, requestId: begun.requestId, kind: 'publish' },
+    ]);
     expect(stagesOf(w.events)).toEqual(['starting', 'gating', 'pushing', 'building']);
     expect(begun.record.requestId).toBe(begun.requestId);
 
@@ -149,9 +173,16 @@ describe('publishing', () => {
     expect(merged.merged).toBe(true);
     w.netlify.addDeploy(productionDeploy(merged.mergeCommitSha!, 'ready'));
 
-    await expect(begun.completed).resolves.toEqual({ outcome: 'succeeded', liveUrl: 'https://client-site.example' });
+    await expect(begun.completed).resolves.toEqual({
+      outcome: 'succeeded',
+      liveUrl: 'https://client-site.example',
+    });
     expect(stagesOf(w.events).at(-1)).toBe('succeeded');
-    expect(w.events.at(-1)).toMatchObject({ type: 'done', outcome: 'succeeded', liveUrl: 'https://client-site.example' });
+    expect(w.events.at(-1)).toMatchObject({
+      type: 'done',
+      outcome: 'succeeded',
+      liveUrl: 'https://client-site.example',
+    });
     expect(w.bus.activeRequest(number)).toBeNull();
   });
 
@@ -160,13 +191,24 @@ describe('publishing', () => {
     const number = await previewed(w.client);
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
     if (!begun.ok) throw new Error('should have begun');
     const merged = w.client.state.pullRequests.find((pr) => pr.number === number)!;
     w.netlify.addDeploy(productionDeploy(merged.mergeCommitSha!, 'error'));
 
-    await expect(begun.completed).resolves.toEqual({ outcome: 'failed', errorCode: 'build_failed' });
-    expect(w.events.at(-1)).toMatchObject({ type: 'done', outcome: 'failed', errorCode: 'build_failed' });
+    await expect(begun.completed).resolves.toEqual({
+      outcome: 'failed',
+      errorCode: 'build_failed',
+    });
+    expect(w.events.at(-1)).toMatchObject({
+      type: 'done',
+      outcome: 'failed',
+      errorCode: 'build_failed',
+    });
   });
 
   it('gives up on a build that never appears, as unreachable rather than as a success', async () => {
@@ -174,10 +216,17 @@ describe('publishing', () => {
     const number = await previewed(w.client);
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
     if (!begun.ok) throw new Error('should have begun');
 
-    await expect(begun.completed).resolves.toEqual({ outcome: 'failed', errorCode: 'site_unreachable' });
+    await expect(begun.completed).resolves.toEqual({
+      outcome: 'failed',
+      errorCode: 'site_unreachable',
+    });
   });
 
   it('refuses without announcing anything when there is nothing to publish', async () => {
@@ -185,7 +234,11 @@ describe('publishing', () => {
     const pullRequest = await openConversation(w.client);
     w.watch(pullRequest.number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: pullRequest.number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: pullRequest.number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'refused', errorCode: 'nothing_to_publish' });
     expect(w.announced).toHaveLength(0);
@@ -196,17 +249,27 @@ describe('publishing', () => {
     const number = await previewed(w.client);
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'request_in_flight' });
     expect(stagesOf(w.events)).toEqual(['starting', 'gating', 'failed']);
-    expect(w.events.at(-1)).toMatchObject({ type: 'done', outcome: 'failed', errorCode: 'request_in_flight' });
+    expect(w.events.at(-1)).toMatchObject({
+      type: 'done',
+      outcome: 'failed',
+      errorCode: 'request_in_flight',
+    });
     expect(w.client.state.pullRequests.find((pr) => pr.number === number)!.merged).toBe(false);
   });
 
   it('answers a conversation that does not exist plainly', async () => {
     const w = world();
-    expect(await beginPublication(w.deps, { conversationNumber: 99, kind: 'publish', actor: 'jane' })).toEqual({ ok: false, reason: 'not_found' });
+    expect(
+      await beginPublication(w.deps, { conversationNumber: 99, kind: 'publish', actor: 'jane' }),
+    ).toEqual({ ok: false, reason: 'not_found' });
   });
 });
 
@@ -214,14 +277,22 @@ describe('undoing', () => {
   it('reverts, records, and waits for the rebuilt site', async () => {
     const w = world();
     const number = await previewed(w.client);
-    const published = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const published = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
     if (!published.ok) throw new Error('should have published');
     const merged = w.client.state.pullRequests.find((pr) => pr.number === number)!;
     w.netlify.addDeploy(productionDeploy(merged.mergeCommitSha!, 'ready'));
     await published.completed;
 
     w.watch(number);
-    const undone = await beginPublication(w.deps, { conversationNumber: number, kind: 'undo', actor: 'jane' });
+    const undone = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'undo',
+      actor: 'jane',
+    });
     if (!undone.ok) throw new Error(`should have undone: ${undone.reason}`);
 
     expect(w.announced[0]).toMatchObject({ kind: 'undo' });
@@ -238,7 +309,11 @@ describe('undoing', () => {
     const w = world();
     const number = await previewed(w.client);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'undo', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'undo',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'refused', errorCode: 'nothing_to_undo' });
   });
@@ -249,9 +324,21 @@ describe('when the record cannot be written after the act', () => {
     const w = world();
     const number = await previewed(w.client);
     w.watch(number);
-    const failing = { ...w.deps, client: { ...w.client, createComment: async () => { throw new Error('comments are down'); } } };
+    const failing = {
+      ...w.deps,
+      client: {
+        ...w.client,
+        createComment: async () => {
+          throw new Error('comments are down');
+        },
+      },
+    };
 
-    const begun = await beginPublication(failing, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(failing, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'internal_error' });
     expect(stagesOf(w.events)).toEqual(['starting', 'gating', 'pushing', 'failed']);
@@ -270,10 +357,18 @@ describe('publishing a change the site has moved past', () => {
   async function advanceSite(client: ReturnType<typeof createFakeRepoClient>): Promise<void> {
     const tip = await client.getRef('refs/heads/main');
     const sha = await client.createLockCommit("someone else's work", tip!.sha);
-    client.state.refs['refs/heads/main'] = { ref: 'refs/heads/main', sha, committedAt: new Date().toISOString() };
+    client.state.refs['refs/heads/main'] = {
+      ref: 'refs/heads/main',
+      sha,
+      committedAt: new Date().toISOString(),
+    };
   }
 
-  function previewDeploy(conversationNumber: number, commitSha: string, state: Deploy['state']): Deploy {
+  function previewDeploy(
+    conversationNumber: number,
+    commitSha: string,
+    state: Deploy['state'],
+  ): Deploy {
     return {
       id: `p-${commitSha}`,
       state,
@@ -293,7 +388,11 @@ describe('publishing a change the site has moved past', () => {
     w.netlify.addDeploy(previewDeploy(number, 'merge-sha', 'ready'));
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     if (!begun.ok) throw new Error(`should have begun: ${begun.reason}`);
     expect(w.mirror.synced).toBe(1);
@@ -301,7 +400,9 @@ describe('publishing a change the site has moved past', () => {
     expect(w.pushes).toEqual([`webagent/c-${number}`]);
     expect(tree.disposed).toBe(1);
     expect(stagesOf(w.events)).toEqual(['starting', 'gating', 'pushing', 'building']);
-    expect(w.events.some((event) => event.type === 'output' && /up to date/i.test(event.text))).toBe(true);
+    expect(
+      w.events.some((event) => event.type === 'output' && /up to date/i.test(event.text)),
+    ).toBe(true);
     expect(w.client.state.pullRequests.find((pr) => pr.number === number)!.merged).toBe(true);
   });
 
@@ -310,7 +411,11 @@ describe('publishing a change the site has moved past', () => {
     const number = await previewed(w.client);
     await advanceSite(w.client);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun.ok).toBe(true);
     expect(w.pushes).toEqual([]);
@@ -322,7 +427,11 @@ describe('publishing a change the site has moved past', () => {
     await advanceSite(w.client);
     w.watch(number);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'site_conflict' });
     expect(stagesOf(w.events)).toEqual(['starting', 'gating', 'failed']);
@@ -336,7 +445,11 @@ describe('publishing a change the site has moved past', () => {
     await advanceSite(w.client);
     w.netlify.addDeploy(previewDeploy(number, 'merge-sha', 'error'));
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'build_failed' });
     expect(tree.disposed).toBe(1);
@@ -348,7 +461,11 @@ describe('publishing a change the site has moved past', () => {
     const number = await previewed(w.client);
     await advanceSite(w.client);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'site_unreachable' });
   });
@@ -362,7 +479,11 @@ describe('publishing a change the site has moved past', () => {
     const number = await previewed(w.client);
     await advanceSite(w.client);
 
-    const begun = await beginPublication(w.deps, { conversationNumber: number, kind: 'publish', actor: 'jane' });
+    const begun = await beginPublication(w.deps, {
+      conversationNumber: number,
+      kind: 'publish',
+      actor: 'jane',
+    });
 
     expect(begun).toMatchObject({ ok: false, reason: 'failed', errorCode: 'internal_error' });
     expect(tree.disposed).toBe(1);

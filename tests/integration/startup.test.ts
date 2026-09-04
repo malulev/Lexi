@@ -44,7 +44,8 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtp://localhost:1025',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'http://localhost:3000',
-  maxConcurrentRuns: 2,    ...overrides,
+    maxConcurrentRuns: 2,
+    ...overrides,
   };
 }
 
@@ -74,14 +75,19 @@ function unreachableSite(): NetlifyClient {
   return {
     ...createFakeNetlifyClient(),
     getSite: async () => {
-      throw new Error('Netlify site "site_fixture" was not found — check NETLIFY_SITE_ID (HTTP 404).');
+      throw new Error(
+        'Netlify site "site_fixture" was not found — check NETLIFY_SITE_ID (HTTP 404).',
+      );
     },
   };
 }
 
 function faultFor(setting: string, faults: Array<{ setting: string; message: string }>): string {
   const fault = faults.find((candidate) => candidate.setting === setting);
-  if (!fault) throw new Error(`no fault reported for ${setting}; got ${faults.map((f) => f.setting).join(', ')}`);
+  if (!fault)
+    throw new Error(
+      `no fault reported for ${setting}; got ${faults.map((f) => f.setting).join(', ')}`,
+    );
   return fault.message;
 }
 

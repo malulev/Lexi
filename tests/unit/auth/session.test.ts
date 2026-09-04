@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '@/types';
-import { SESSION_COOKIE, issueSession, sessionCookieOptions, verifySession } from '@/lib/auth/session';
+import {
+  SESSION_COOKIE,
+  issueSession,
+  sessionCookieOptions,
+  verifySession,
+} from '@/lib/auth/session';
 
 // Unit tests build their own Env rather than reading process.env, so this
 // suite stays independent of src/lib/config (owned by another task).
@@ -22,7 +27,8 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://client.example',
-  maxConcurrentRuns: 2,    ...overrides,
+    maxConcurrentRuns: 2,
+    ...overrides,
   };
 }
 

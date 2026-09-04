@@ -52,7 +52,8 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://client.example',
-  maxConcurrentRuns: 2,    ...overrides,
+    maxConcurrentRuns: 2,
+    ...overrides,
   };
 }
 
@@ -161,11 +162,7 @@ describe('verifyConfigCredential', () => {
   it('refuses rather than throws when the configured secret is not usable base32', async () => {
     const env = buildEnv({ configTotpSecret: 'not base32 at all!!!' });
 
-    const result = await verifyConfigCredential(
-      { password: PASSWORD, code: '123456' },
-      env,
-      AT,
-    );
+    const result = await verifyConfigCredential({ password: PASSWORD, code: '123456' }, env, AT);
 
     expect(result).toEqual({ ok: false, reason: 'misconfigured' });
   });
@@ -216,7 +213,9 @@ describe('issueConfigSession / verifyConfigSession', () => {
   });
 
   it('does not demand https from an installation served over http', () => {
-    const options = configSessionCookieOptions(buildEnv({ publicBaseUrl: 'http://localhost:3000' }));
+    const options = configSessionCookieOptions(
+      buildEnv({ publicBaseUrl: 'http://localhost:3000' }),
+    );
 
     expect(options.secure).toBe(false);
   });

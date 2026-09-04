@@ -88,7 +88,8 @@ const ENV: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'no-reply@example.com',
   publicBaseUrl: 'https://client.example.com',
-  maxConcurrentRuns: 2,};
+  maxConcurrentRuns: 2,
+};
 
 const CONVERSATION = { number: 42, title: 'Homepage hero refresh' };
 
@@ -130,10 +131,7 @@ describe('notifyOnce (OD-004 idempotency)', () => {
     const client = createFakeRepoClient([commentWithRecord(1, 'Your preview is ready.', record)]);
     const mailer = createFakeMailer();
 
-    const result = await notifyOnce(
-      { mailer, client, env: ENV },
-      baseInput({ record }),
-    );
+    const result = await notifyOnce({ mailer, client, env: ENV }, baseInput({ record }));
 
     expect(result).toEqual({ sent: false, reason: 'already_notified' });
     expect(mailer.sent).toEqual([]);
@@ -190,7 +188,10 @@ describe('notifyOnce (OD-004 idempotency)', () => {
     const rereadRecord = parseComment(rewritten).record;
     if (!rereadRecord) throw new Error('test setup: record failed to parse');
 
-    const second = await notifyOnce({ mailer, client, env: ENV }, baseInput({ record: rereadRecord }));
+    const second = await notifyOnce(
+      { mailer, client, env: ENV },
+      baseInput({ record: rereadRecord }),
+    );
 
     expect(second).toEqual({ sent: false, reason: 'already_notified' });
     expect(mailer.sent).toHaveLength(1);

@@ -23,7 +23,8 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://client.example',
-  maxConcurrentRuns: 2,    ...overrides,
+    maxConcurrentRuns: 2,
+    ...overrides,
   };
 }
 
@@ -34,7 +35,10 @@ describe('authorizeSession', () => {
 
     const result = authorizeSession(cookie, env);
 
-    expect(result).toEqual({ ok: true, session: { email: 'jane@client.example', expiresAt: expect.any(Number) } });
+    expect(result).toEqual({
+      ok: true,
+      session: { email: 'jane@client.example', expiresAt: expect.any(Number) },
+    });
   });
 
   it('reports no_session when there is no cookie at all', () => {
@@ -76,7 +80,9 @@ describe('authorizeSession', () => {
   // sign-in must stop being valid the moment env.allowedEmails narrows,
   // without anything re-issuing or re-checking at sign-in time only.
   it('re-checks against the configured ALLOWED_EMAILS on every call, not only at sign-in', () => {
-    const signInEnv = buildEnv({ allowedEmails: ['jane@client.example', 'marketing@client.example'] });
+    const signInEnv = buildEnv({
+      allowedEmails: ['jane@client.example', 'marketing@client.example'],
+    });
     const cookie = issueSession('jane@client.example', signInEnv);
 
     const firstRequest = authorizeSession(cookie, signInEnv);

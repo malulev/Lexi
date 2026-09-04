@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Env } from '@/types';
-import { MAGIC_LINK_TTL_MS, issueMagicLinkToken, verifyMagicLinkToken } from '@/lib/auth/magic-link';
+import {
+  MAGIC_LINK_TTL_MS,
+  issueMagicLinkToken,
+  verifyMagicLinkToken,
+} from '@/lib/auth/magic-link';
 
 // Unit tests build their own Env rather than reading process.env, so this
 // suite stays independent of src/lib/config (owned by another task).
@@ -22,7 +26,8 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://client.example',
-  maxConcurrentRuns: 2,    ...overrides,
+    maxConcurrentRuns: 2,
+    ...overrides,
   };
 }
 
@@ -71,7 +76,9 @@ describe('verifyMagicLinkToken', () => {
     const justBeforeExpiry = new Date(issuedAt.getTime() + MAGIC_LINK_TTL_MS - 1);
     const justAfterExpiry = new Date(issuedAt.getTime() + MAGIC_LINK_TTL_MS + 1);
 
-    expect(verifyMagicLinkToken(token, env, justBeforeExpiry)).toEqual({ email: 'jane@client.example' });
+    expect(verifyMagicLinkToken(token, env, justBeforeExpiry)).toEqual({
+      email: 'jane@client.example',
+    });
     expect(verifyMagicLinkToken(token, env, justAfterExpiry)).toBeNull();
   });
 
