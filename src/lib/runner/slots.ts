@@ -10,10 +10,15 @@ import type Docker from 'dockerode';
  * running: every one carries `AGENT_LABEL`, and a container that died is
  * simply no longer listed, so there is no stale state to reason about.
  *
- * Two processes can check at the same instant and both proceed. That bounds
- * the overshoot at one extra container, which the container's own resource
- * caps make harmless; an exact semaphore would need shared state this
- * product deliberately does not have (constitution VII).
+ * This is a check-then-act race, not a semaphore: every waiter whose poll
+ * lands between a slot freeing and the first waiter's `createContainer`
+ * observes the same free slot and also proceeds, so the overshoot is bounded
+ * by the number of concurrent waiters, not by one. Poll jitter (below) keeps
+ * waiters from polling in lockstep, which narrows that window but does not
+ * close it. Per-container memory and CPU caps that would make an overshoot
+ * harmless are a planned follow-up, not something this module relies on
+ * today. An exact semaphore would need shared state this product
+ * deliberately does not have (constitution VII).
  */
 
 export const AGENT_LABEL = 'webagent.agent';
@@ -41,6 +46,8 @@ export interface CreateDockerSlotsOptions {
   maxWaitMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  /** Source of the jitter unit in `[0, 1)`. Injectable so tests stay deterministic. */
+  random?: () => number;
 }
 
 const DEFAULT_POLL_MS = 3_000;
@@ -52,6 +59,11 @@ function describe(error: unknown): string {
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Spreads waiters out between 75% and 125% of the poll interval so several hosts' worth of installations do not poll in lockstep. */
+function jitteredPoll(pollMs: number, unit: number): number {
+  return Math.round(pollMs * (0.75 + unit * 0.5));
 }
 
 /**
@@ -79,6 +91,7 @@ export function createDockerSlots(options: CreateDockerSlotsOptions): AgentSlots
   const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? pause;
+  const random = options.random ?? Math.random;
 
   async function acquire(acquireOptions: { onWait?: () => void } = {}): Promise<SlotOutcome> {
     const startedAt = now();
@@ -95,7 +108,7 @@ export function createDockerSlots(options: CreateDockerSlotsOptions): AgentSlots
         announced = true;
         acquireOptions.onWait?.();
       }
-      await sleep(pollMs);
+      await sleep(jitteredPoll(pollMs, random()));
     }
   }
 

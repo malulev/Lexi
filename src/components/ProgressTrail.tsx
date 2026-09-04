@@ -123,9 +123,27 @@ export function buildTrailSteps(
     ];
   }
 
+  const latestIndex = path.indexOf(latest);
+  if (latestIndex === -1) {
+    // An off-path stage (`queued`): the steps genuinely reached stay done, the
+    // wait itself is current, and the rest of the path is still ahead.
+    return [
+      ...path
+        .filter((stage) => stage !== 'succeeded' && stageHistory.includes(stage))
+        .map((stage) => ({ stage, label: describeStage(stage, kind, t), status: 'done' as const })),
+      { stage: latest, label: describeStage(latest, kind, t), status: 'current' as const },
+      ...path
+        .filter((stage) => !stageHistory.includes(stage))
+        .map((stage) => ({
+          stage,
+          label: describeStage(stage, kind, t),
+          status: 'pending' as const,
+        })),
+    ];
+  }
+
   // Reaching the end implies the whole path was walked, even when the record
   // only wrote the ending — a publish record carries its one terminal stage.
-  const latestIndex = path.indexOf(latest);
   return path.map((stage, index) => ({
     stage,
     label: describeStage(stage, kind, t),

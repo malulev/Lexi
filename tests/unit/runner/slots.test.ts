@@ -79,6 +79,7 @@ describe('createDockerSlots', () => {
       pollMs: 3_000,
       now: time.now,
       sleep,
+      random: () => 0.5,
     });
 
     expect(await slots.acquire({ onWait })).toEqual({ ok: true });
@@ -96,6 +97,7 @@ describe('createDockerSlots', () => {
       maxWaitMs: 5 * 60_000,
       now: time.now,
       sleep: time.sleep,
+      random: () => 0.5,
     });
 
     expect(await slots.acquire()).toEqual({ ok: false, waitedMs: 5 * 60_000 });
@@ -106,6 +108,34 @@ describe('createDockerSlots', () => {
     const slots = createDockerSlots({ docker: daemonReporting([1, 0]), limit: 1, ...clock() });
     expect(await slots.acquire({ onWait })).toEqual({ ok: true });
     expect(onWait).toHaveBeenCalledOnce();
+  });
+
+  it('spreads waiters between 75% and 125% of the poll interval so they do not poll in lockstep', async () => {
+    const time = clock();
+    const sleepLow = vi.fn(time.sleep);
+    const lowSlots = createDockerSlots({
+      docker: daemonReporting([2, 0]),
+      limit: 2,
+      pollMs: 3_000,
+      now: time.now,
+      sleep: sleepLow,
+      random: () => 0,
+    });
+    expect(await lowSlots.acquire()).toEqual({ ok: true });
+    expect(sleepLow).toHaveBeenCalledWith(2_250);
+
+    const highTime = clock();
+    const sleepHigh = vi.fn(highTime.sleep);
+    const highSlots = createDockerSlots({
+      docker: daemonReporting([2, 0]),
+      limit: 2,
+      pollMs: 3_000,
+      now: highTime.now,
+      sleep: sleepHigh,
+      random: () => 1,
+    });
+    expect(await highSlots.acquire()).toEqual({ ok: true });
+    expect(sleepHigh).toHaveBeenCalledWith(3_750);
   });
 });
 

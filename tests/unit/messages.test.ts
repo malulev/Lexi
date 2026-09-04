@@ -42,7 +42,7 @@ describe('the client-facing vocabulary', () => {
 
   it('uses no git or build vocabulary', () => {
     const forbidden =
-      /\b(commit|branch|merge|rebase|diff|repository|repo|pull request|PR|SHA|stack trace|exception|npm|webpack|stderr|exit code)\b/i;
+      /\b(commit|branch|merge|rebase|diff|repository|repo|pull request|PR|SHA|stack trace|exception|npm|webpack|stderr|exit code|slot|queue depth|container|docker)\b/i;
     for (const [code, message] of messages) {
       expect(message, code).not.toMatch(forbidden);
     }

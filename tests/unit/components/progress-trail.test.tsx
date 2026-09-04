@@ -105,9 +105,35 @@ describe('buildTrailSteps', () => {
   });
 
   it('shows the full happy path as done once the request succeeds', () => {
-    const steps = buildTrailSteps(['starting', 'running', 'gating', 'pushing', 'building', 'succeeded']);
+    const steps = buildTrailSteps([
+      'starting',
+      'running',
+      'gating',
+      'pushing',
+      'building',
+      'succeeded',
+    ]);
     expect(steps.every((s) => s.status === 'done' || s.stage === 'succeeded')).toBe(true);
     expect(steps[steps.length - 1]).toMatchObject({ stage: 'succeeded', status: 'current' });
+  });
+
+  it('shows a wait for a free turn as the current step, between what was reached and what is ahead', () => {
+    const steps = buildTrailSteps(['starting', 'queued']);
+    expect(steps.map((s) => [s.stage, s.status])).toEqual([
+      ['starting', 'done'],
+      ['queued', 'current'],
+      ['running', 'pending'],
+      ['gating', 'pending'],
+      ['pushing', 'pending'],
+      ['building', 'pending'],
+      ['succeeded', 'pending'],
+    ]);
+    expect(steps.find((s) => s.status === 'current')?.label).toBe('Waiting for a free turn');
+  });
+
+  it('keeps the wait in the story when the request then runs and later fails', () => {
+    const steps = buildTrailSteps(['starting', 'queued', 'running', 'gating', 'blocked']);
+    expect(steps.map((s) => s.stage)).toEqual(['starting', 'running', 'gating', 'blocked']);
   });
 
   it('walks a publish through only the steps a publish has — no agent, no gate', () => {
@@ -118,7 +144,11 @@ describe('buildTrailSteps', () => {
       status: 'current',
       label: 'Publishing your change',
     });
-    expect(steps.at(-1)).toMatchObject({ stage: 'succeeded', label: 'Live on your website', status: 'pending' });
+    expect(steps.at(-1)).toMatchObject({
+      stage: 'succeeded',
+      label: 'Live on your website',
+      status: 'pending',
+    });
   });
 
   it('stops a publish honestly when the site moved on', () => {
