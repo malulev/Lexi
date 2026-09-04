@@ -1,13 +1,13 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PassThrough } from 'node:stream';
 import type Docker from 'dockerode';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentPrompt } from '@/types';
 import { assertControlDirOutsideWorkDir, writeControlDir } from '@/lib/runner/control';
 import { createDockerRunner } from '@/lib/runner/docker';
 import type { RunRequest } from '@/lib/runner/types';
+import { createFakeDocker } from './fake-docker';
 
 /**
  * FR-015, checked without a Docker daemon anywhere in the process (a fake
@@ -35,29 +35,6 @@ const samplePrompt: AgentPrompt = {
   history: [{ author: 'client', text: 'Make it punchier' }],
   guidance: 'Keep the brand voice friendly.',
 };
-
-/** Enough of dockerode's `Container` for `createDockerRunner.run` to complete without a daemon. */
-function createFakeContainer(id: string): Docker.Container {
-  return {
-    id,
-    modem: { demuxStream: () => {} },
-    attach: async () => new PassThrough() as unknown as NodeJS.ReadWriteStream,
-    start: async () => {},
-    wait: async () => ({ StatusCode: 0 }),
-    kill: async () => {},
-    remove: async () => {},
-  } as unknown as Docker.Container;
-}
-
-function createFakeDocker(calls: Docker.ContainerCreateOptions[]): Docker {
-  return {
-    modem: { demuxStream: () => {} },
-    createContainer: async (opts: Docker.ContainerCreateOptions) => {
-      calls.push(opts);
-      return createFakeContainer('fake-container-id');
-    },
-  } as unknown as Docker;
-}
 
 let originalGithubToken: string | undefined;
 let originalNetlifyToken: string | undefined;
@@ -99,7 +76,10 @@ describe('container environment', () => {
 
     expect(calls).toHaveLength(1);
     const env = calls[0]?.Env ?? [];
-    expect(env).toEqual(['OPENROUTER_API_KEY=or-key-abc123', 'MODEL=openrouter/anthropic/claude-sonnet-latest']);
+    expect(env).toEqual([
+      'OPENROUTER_API_KEY=or-key-abc123',
+      'MODEL=openrouter/anthropic/claude-sonnet-latest',
+    ]);
 
     const serialized = JSON.stringify(calls[0]);
     expect(serialized).not.toContain(GITHUB_SECRET);
@@ -172,11 +152,15 @@ describe('writeControlDir', () => {
   it('refuses a controlDir inside workDir', async () => {
     const nestedControlDir = join(workDir, '.control');
 
-    await expect(writeControlDir(nestedControlDir, workDir, samplePrompt)).rejects.toThrow(/must not be inside/);
+    await expect(writeControlDir(nestedControlDir, workDir, samplePrompt)).rejects.toThrow(
+      /must not be inside/,
+    );
   });
 
   it('refuses a controlDir equal to workDir', async () => {
-    await expect(writeControlDir(workDir, workDir, samplePrompt)).rejects.toThrow(/must not be inside/);
+    await expect(writeControlDir(workDir, workDir, samplePrompt)).rejects.toThrow(
+      /must not be inside/,
+    );
   });
 
   it('leaves no file reachable from within the working tree it stands in for', async () => {

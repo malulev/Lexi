@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { PassThrough } from 'node:stream';
 import { assertControlDirOutsideWorkDir, readAgentResult } from './control';
+import { AGENT_LABEL } from './slots';
 import type { JobRunner, RunRequest, RunResult } from './types';
 
 /**
@@ -47,6 +48,9 @@ function buildContainerOptions(
     Env: [`OPENROUTER_API_KEY=${apiKey}`, `MODEL=${request.model}`],
     WorkingDir: '/work',
     Tty: false,
+    // Counted by slots.ts across every installation on this host. The request
+    // id is for a developer reading `docker ps`, nothing reads it back.
+    Labels: { [AGENT_LABEL]: 'true', 'webagent.request': request.requestId },
     HostConfig: {
       Binds: [`${request.workDir}:/work`, `${request.controlDir}:/control`],
       CapDrop: ['ALL'],
@@ -76,7 +80,11 @@ function forwardLines(stream: NodeJS.ReadableStream, onOutput: (line: string) =>
  * stdout vs stderr), not plain text — reading it without `demuxStream`
  * silently corrupts the progress stream with header bytes mixed into it.
  */
-function wireOutput(docker: Docker, attached: NodeJS.ReadWriteStream, onOutput?: (line: string) => void): void {
+function wireOutput(
+  docker: Docker,
+  attached: NodeJS.ReadWriteStream,
+  onOutput?: (line: string) => void,
+): void {
   if (!onOutput) return;
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -108,8 +116,17 @@ function describeError(error: unknown): string {
 }
 
 /** Logged, never rethrown: cleanup runs inside a `finally` that must not shadow the run's real outcome. */
-function logCleanupFailure(action: string, requestId: string, containerId: string, error: unknown): void {
-  console.error(`runner/docker: ${action} failed`, { requestId, containerId, error: describeError(error) });
+function logCleanupFailure(
+  action: string,
+  requestId: string,
+  containerId: string,
+  error: unknown,
+): void {
+  console.error(`runner/docker: ${action} failed`, {
+    requestId,
+    containerId,
+    error: describeError(error),
+  });
 }
 
 export function createDockerRunner(options: CreateDockerRunnerOptions): JobRunner {
@@ -134,7 +151,9 @@ export function createDockerRunner(options: CreateDockerRunnerOptions): JobRunne
       // either. Inside the `try`: `run` never throws, it reports `error`.
       assertControlDirOutsideWorkDir(request.controlDir, request.workDir);
 
-      container = await docker.createContainer(buildContainerOptions(options.image, options.apiKey, request));
+      container = await docker.createContainer(
+        buildContainerOptions(options.image, options.apiKey, request),
+      );
       containersByRequestId.set(request.requestId, container);
 
       const attached = await container.attach({ stream: true, stdout: true, stderr: true });
