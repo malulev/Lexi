@@ -226,6 +226,8 @@ export const nl: Dictionary = {
   errors: {
     blocked_by_policy: 'Je ontwikkelaar heeft dit deel van de site beschermd.',
     request_in_flight: 'Er wordt al een wijziging doorgevoerd — momentje.',
+    too_busy:
+      'Het is nu druk, dus je wijziging is niet uitgevoerd. Probeer het over een paar minuten opnieuw. Er is niets gepubliceerd.',
     agent_timeout: 'Dat duurde te lang. Probeer een kleinere of specifiekere wijziging.',
     build_failed:
       'Door de wijziging kon de site niet meer worden gebouwd. Ik kan proberen het te herstellen.',

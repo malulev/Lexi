@@ -62,7 +62,19 @@ function genProse(rng: () => number): string {
     if (chance(rng, 0.3)) {
       words.push(pick(rng, UNICODE_SAMPLES));
     } else {
-      words.push(pick(rng, ['Changed', 'the', 'homepage', 'hero', 'button', 'color', 'and', 'spacing.', 'Done!']));
+      words.push(
+        pick(rng, [
+          'Changed',
+          'the',
+          'homepage',
+          'hero',
+          'button',
+          'color',
+          'and',
+          'spacing.',
+          'Done!',
+        ]),
+      );
     }
   }
   let prose = words.join(' ');
@@ -76,18 +88,43 @@ function genProse(rng: () => number): string {
 }
 
 const STAGES: Stage[] = [
-  'starting', 'queued', 'running', 'gating', 'pushing', 'building', 'succeeded', 'blocked', 'failed', 'abandoned',
+  'starting',
+  'queued',
+  'running',
+  'gating',
+  'pushing',
+  'building',
+  'succeeded',
+  'blocked',
+  'failed',
+  'abandoned',
 ];
 const OUTCOMES: Outcome[] = ['succeeded', 'blocked', 'failed', 'abandoned'];
 const VIOLATIONS: PolicyViolation[] = [
-  'protected_path', 'denied_path', 'not_allowed_path', 'too_many_files', 'too_many_lines', 'new_dependency',
+  'protected_path',
+  'denied_path',
+  'not_allowed_path',
+  'too_many_files',
+  'too_many_lines',
+  'new_dependency',
 ];
 const ERROR_CODES: ErrorCode[] = [
-  'blocked_by_policy', 'request_in_flight', 'agent_timeout', 'build_failed',
-  'site_unreachable', 'cost_ceiling', 'out_of_date', 'nothing_to_change', 'internal_error',
+  'blocked_by_policy',
+  'request_in_flight',
+  'agent_timeout',
+  'build_failed',
+  'site_unreachable',
+  'cost_ceiling',
+  'out_of_date',
+  'nothing_to_change',
+  'internal_error',
 ];
 const NOTIFICATION_EVENTS: NotificationEvent[] = [
-  'preview_ready', 'request_blocked', 'request_failed', 'published', 'undone',
+  'preview_ready',
+  'request_blocked',
+  'request_failed',
+  'published',
+  'undone',
 ];
 
 function genStages(rng: () => number): RequestRecord['stages'] {
@@ -121,14 +158,20 @@ function genRequestRecord(rng: () => number): RequestRecord {
   if (chance(rng, 0.7)) record.commitSha = intBetween(rng, 0, 0xfffffff).toString(16);
   if (chance(rng, 0.7)) record.filesChanged = intBetween(rng, 0, 20);
   if (chance(rng, 0.7)) record.diffLines = intBetween(rng, 0, 2000);
-  if (chance(rng, 0.7)) record.model = pick(rng, ['anthropic/claude-sonnet-latest', 'openai/gpt-5', 'anthropic/claude-haiku']);
+  if (chance(rng, 0.7))
+    record.model = pick(rng, [
+      'anthropic/claude-sonnet-latest',
+      'openai/gpt-5',
+      'anthropic/claude-haiku',
+    ]);
   if (chance(rng, 0.7)) record.tokensIn = intBetween(rng, 0, 200000);
   if (chance(rng, 0.7)) record.tokensOut = intBetween(rng, 0, 20000);
   // Floats are the interesting case: JSON round-trips IEEE-754 doubles
   // exactly via their shortest decimal representation, so no epsilon
   // comparison should be needed here — equality must be exact.
   if (chance(rng, 0.7)) record.costUsd = floatBetween(rng, 0, 5);
-  if (chance(rng, 0.5)) record.previewUrl = `https://deploy-preview-${intBetween(rng, 1, 999)}--client.netlify.app`;
+  if (chance(rng, 0.5))
+    record.previewUrl = `https://deploy-preview-${intBetween(rng, 1, 999)}--client.netlify.app`;
 
   const notified = genNotified(rng);
   if (notified !== undefined) record.notified = notified;
@@ -139,7 +182,12 @@ function genRequestRecord(rng: () => number): RequestRecord {
   // would reject.
   if (outcome === 'blocked') {
     record.violation = pick(rng, VIOLATIONS);
-    record.blockedPath = pick(rng, ['.env.production', 'netlify.toml', 'src/app/page.tsx', UNICODE_SAMPLES[0] as string]);
+    record.blockedPath = pick(rng, [
+      '.env.production',
+      'netlify.toml',
+      'src/app/page.tsx',
+      UNICODE_SAMPLES[0] as string,
+    ]);
   }
   if (outcome === 'failed') {
     record.errorCode = pick(rng, ERROR_CODES);
@@ -161,10 +209,38 @@ describe('renderRecord and parseComment are inverses (property test, T029)', () 
 
     it(`round-trips generated sample #${i} (seed ${SEED})`, () => {
       const rendered = renderRecord(prose, record);
-      const parsed = parseComment({ id: i, author: 'webagent-bot', body: rendered, createdAt: record.finishedAt });
+      const parsed = parseComment({
+        id: i,
+        author: 'webagent-bot',
+        body: rendered,
+        createdAt: record.finishedAt,
+      });
 
       expect(parsed.prose).toBe(prose);
       expect(parsed.record).toEqual(record);
     });
   }
+
+  it('round-trips a request that never got a turn', () => {
+    const record: RequestRecord = {
+      requestId: 'r_busy',
+      startedAt: '2026-09-04T10:00:00.000Z',
+      finishedAt: '2026-09-04T10:15:00.000Z',
+      outcome: 'failed',
+      stages: [
+        { stage: 'queued', at: '2026-09-04T10:00:01.000Z' },
+        { stage: 'failed', at: '2026-09-04T10:15:00.000Z' },
+      ],
+      errorCode: 'too_busy',
+      errorDetail: 'no agent slot became free within 15 minutes (MAX_CONCURRENT_RUNS=2)',
+    };
+    const rendered = renderRecord('prose', record);
+    const parsed = parseComment({
+      id: 0,
+      author: 'webagent-bot',
+      body: rendered,
+      createdAt: record.finishedAt,
+    });
+    expect(parsed.record).toEqual(record);
+  });
 });

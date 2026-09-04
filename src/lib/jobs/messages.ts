@@ -16,6 +16,8 @@ import type { ErrorCode, PolicyViolation } from '@/types';
 export const CLIENT_MESSAGES: Record<ErrorCode, string> = {
   blocked_by_policy: 'Your developer has protected this part of the site.',
   request_in_flight: 'A change is already being applied — one moment.',
+  too_busy:
+    'Things are busy right now, so your change did not run. Please try again in a few minutes. Nothing was published.',
   agent_timeout: 'That took too long. Try a smaller or more specific change.',
   build_failed: 'The change broke the site build. I can try to fix it.',
   site_unreachable: "Can't reach your website's hosting right now.",
@@ -111,6 +113,7 @@ export const CLIENT_PROSE: readonly string[] = [
 export const ERROR_STATUS: Record<ErrorCode, number> = {
   blocked_by_policy: 422,
   request_in_flight: 409,
+  too_busy: 503,
   agent_timeout: 504,
   build_failed: 422,
   site_unreachable: 502,

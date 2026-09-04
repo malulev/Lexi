@@ -154,6 +154,7 @@ export type Outcome = 'succeeded' | 'blocked' | 'failed' | 'abandoned';
 export type ErrorCode =
   | 'blocked_by_policy'
   | 'request_in_flight'
+  | 'too_busy'
   | 'agent_timeout'
   | 'build_failed'
   | 'site_unreachable'

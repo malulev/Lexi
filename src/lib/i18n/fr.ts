@@ -235,6 +235,8 @@ export const fr: Dictionary = {
   errors: {
     blocked_by_policy: 'Votre développeur a protégé cette partie du site.',
     request_in_flight: 'Une modification est déjà en cours — un instant.',
+    too_busy:
+      'C’est chargé en ce moment, votre modification n’a donc pas été lancée. Réessayez dans quelques minutes. Rien n’a été publié.',
     agent_timeout:
       'Cela a pris trop de temps. Essayez une modification plus petite ou plus précise.',
     build_failed: 'La modification a cassé la construction du site. Je peux essayer de réparer.',

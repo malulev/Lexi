@@ -599,6 +599,7 @@ export const DEFAULT_ERROR_DETAIL: Record<ErrorCode, string> = {
     'the default branch and the change touch the same lines, so bringing the change up to date needs a person',
   site_unreachable: 'the hosting provider reported no deploy for this branch within the wait',
   request_in_flight: 'another request held the installation lock',
+  too_busy: 'no agent slot became free on this host within the queue wait (MAX_CONCURRENT_RUNS)',
   blocked_by_policy: 'the change touched a path the policy does not permit',
   out_of_date: 'the branch moved under the request between reading and pushing',
   build_failed: 'the hosting provider reported a failed build',

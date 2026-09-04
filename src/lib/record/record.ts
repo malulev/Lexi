@@ -62,6 +62,7 @@ const VIOLATION_VALUES: PolicyViolation[] = [
 const ERROR_CODE_VALUES: ErrorCode[] = [
   'blocked_by_policy',
   'request_in_flight',
+  'too_busy',
   'agent_timeout',
   'build_failed',
   'site_unreachable',
