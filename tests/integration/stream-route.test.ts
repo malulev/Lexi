@@ -6,6 +6,7 @@ import { claimConversationBranch } from '@/lib/conversations';
 import { setInstallation, type Installation } from '@/lib/installation';
 import { createFakeMailer } from '@/lib/notify/email';
 import { renderRecord } from '@/lib/record';
+import { UNLIMITED_SLOTS } from '@/lib/runner/slots';
 import type { RequestRecord } from '@/types';
 import { CONFIG, createHarness, type Harness } from './harness';
 
@@ -47,6 +48,7 @@ function installHarness(current: Harness): void {
     netlify: current.netlify,
     mirror: current.deps.mirror,
     runner: current.deps.runner,
+    slots: UNLIMITED_SLOTS,
     mailer: createFakeMailer(),
     bus: current.bus,
     lock: current.lock,
@@ -81,7 +83,10 @@ async function recordSomething(conversationNumber: number): Promise<void> {
     ],
     previewUrl: 'https://deploy-preview-1--client.netlify.app',
   };
-  await harness!.client.createComment(conversationNumber, renderRecord('Your preview is ready.', record));
+  await harness!.client.createComment(
+    conversationNumber,
+    renderRecord('Your preview is ready.', record),
+  );
 }
 
 interface WireEvent {
@@ -175,14 +180,21 @@ describe('the progress stream', () => {
     const second = await connection.next();
     connection.hangUp();
 
-    expect(announced).toEqual({ event: 'request', data: { requestId: 'r_later', kind: 'change', live: true, resumed: false } });
+    expect(announced).toEqual({
+      event: 'request',
+      data: { requestId: 'r_later', kind: 'change', live: true, resumed: false },
+    });
     expect(first.data).toMatchObject({ stage: 'starting' });
     expect(second.data).toMatchObject({ stage: 'running' });
   });
 
   it('picks up a publish already under way when the page is opened mid-build', async () => {
     const number = await openConversation(harness!);
-    harness!.bus.announce({ conversationNumber: number, requestId: 'publish_now', kind: 'publish' });
+    harness!.bus.announce({
+      conversationNumber: number,
+      requestId: 'publish_now',
+      kind: 'publish',
+    });
     harness!.bus.publish({ type: 'stage', requestId: 'publish_now', stage: 'building', at: 't1' });
 
     const connection = await connect(number);
@@ -190,7 +202,12 @@ describe('the progress stream', () => {
     connection.hangUp();
 
     expect(events.map((e) => e.event)).toEqual(['request', 'stage', 'sync']);
-    expect(events[0]!.data).toMatchObject({ requestId: 'publish_now', kind: 'publish', live: true, resumed: true });
+    expect(events[0]!.data).toMatchObject({
+      requestId: 'publish_now',
+      kind: 'publish',
+      live: true,
+      resumed: true,
+    });
     expect(events.at(-1)!.data).toEqual({ inFlight: true });
   });
 

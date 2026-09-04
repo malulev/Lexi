@@ -9,6 +9,7 @@ import { setInstallation, type Installation } from '@/lib/installation';
 import { runRequest } from '@/lib/jobs/run';
 import type { Deploy } from '@/lib/netlify/types';
 import { createFakeMailer, type Mailer } from '@/lib/notify/email';
+import { UNLIMITED_SLOTS } from '@/lib/runner/slots';
 import { CONFIG, createHarness, type Harness } from './harness';
 
 /**
@@ -56,6 +57,7 @@ function installHarness(current: Harness, post: Mailer): void {
     netlify: current.netlify,
     mirror: current.deps.mirror,
     runner: current.deps.runner,
+    slots: UNLIMITED_SLOTS,
     mailer: post,
     bus: current.bus,
     lock: current.lock,
@@ -65,7 +67,10 @@ function installHarness(current: Harness, post: Mailer): void {
 }
 
 function post(
-  handler: (request: Request, context: { params: Promise<{ number: string }> }) => Promise<Response>,
+  handler: (
+    request: Request,
+    context: { params: Promise<{ number: string }> },
+  ) => Promise<Response>,
   conversationNumber: number,
 ): Promise<Response> {
   return handler(

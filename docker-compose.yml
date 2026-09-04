@@ -82,6 +82,9 @@ services:
       WEBAGENT_STATE_DIR: ${WEBAGENT_STATE_DIR:-/var/lib/webagent}
       AGENT_IMAGE: ${AGENT_IMAGE:-webagent/agent:latest}
       NODE_ENV: production
+      # Host-wide cap on agent containers, counted on the daemon above across
+      # every installation that shares it. See README, "Several sites on one host".
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
 
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

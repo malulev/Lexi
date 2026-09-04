@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import Docker from 'dockerode';
 
 import { loadEnv } from '@/lib/config/env';
 import { createConfigCache, type ConfigCache } from '@/lib/config/cache';
@@ -12,6 +13,7 @@ import type { Mirror } from '@/lib/mirror/types';
 import { createNetlifyClient, type NetlifyClient } from '@/lib/netlify';
 import { createMailer, type Mailer } from '@/lib/notify/email';
 import { createDockerRunner } from '@/lib/runner/docker';
+import { createDockerSlots, type AgentSlots } from '@/lib/runner/slots';
 import type { JobRunner } from '@/lib/runner/types';
 import type { Env } from '@/types';
 
@@ -32,6 +34,7 @@ export interface Installation {
   netlify: NetlifyClient;
   mirror: Mirror;
   runner: JobRunner;
+  slots: AgentSlots;
   mailer: Mailer;
   bus: JobBus;
   lock: ReturnType<typeof createLock>;
@@ -60,6 +63,10 @@ export function getInstallation(): Installation {
   const env = loadEnv();
   const client = createRepoClient(env);
 
+  // One daemon connection for both: the slot count must see the same daemon
+  // the runner creates containers on, or it counts the wrong host.
+  const docker = new Docker();
+
   const installation: Installation = {
     env,
     client,
@@ -72,7 +79,8 @@ export function getInstallation(): Installation {
       // while publishing reads as the product's in the site's history.
       author: { name: 'Site Editor', email: env.smtpFrom },
     }),
-    runner: createDockerRunner({ image: AGENT_IMAGE, apiKey: env.openrouterApiKey }),
+    runner: createDockerRunner({ image: AGENT_IMAGE, apiKey: env.openrouterApiKey, docker }),
+    slots: createDockerSlots({ docker, limit: env.maxConcurrentRuns }),
     mailer: createMailer(env),
     bus: jobBus,
     lock: createLock(client),

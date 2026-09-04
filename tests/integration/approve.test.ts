@@ -11,6 +11,7 @@ import { runRequest } from '@/lib/jobs/run';
 import type { Deploy } from '@/lib/netlify/types';
 import { createFakeMailer, type Mailer } from '@/lib/notify/email';
 import { renderRecord } from '@/lib/record';
+import { UNLIMITED_SLOTS } from '@/lib/runner/slots';
 import type { RequestRecord } from '@/types';
 import { CONFIG, createHarness, readPushedFile, type Harness } from './harness';
 
@@ -59,6 +60,7 @@ function installHarness(current: Harness, post: Mailer): void {
     netlify: current.netlify,
     mirror: current.deps.mirror,
     runner: current.deps.runner,
+    slots: UNLIMITED_SLOTS,
     mailer: post,
     bus: current.bus,
     lock: current.lock,
@@ -162,7 +164,10 @@ async function recordOutcome(
  * merge that brings the change up to date is a real one, and the fake
  * repository client, so the ancestry check sees the site ahead.
  */
-async function advanceDefaultBranch(current: Harness, files: Record<string, string>): Promise<void> {
+async function advanceDefaultBranch(
+  current: Harness,
+  files: Record<string, string>,
+): Promise<void> {
   const clone = join(current.originDir, '..', `site-${Date.now()}`);
   await simpleGit().clone(current.originDir, clone);
   const git = simpleGit(clone);
@@ -213,7 +218,9 @@ describe('approving a previewed change', () => {
 
     const confirmation = detail!.messages.at(-1)!;
     expect(confirmation.text.toLowerCase()).toContain('published');
-    expect(confirmation.text).not.toMatch(/\b(commit|branch|merge|pull request|diff|deploy-preview)\b/i);
+    expect(confirmation.text).not.toMatch(
+      /\b(commit|branch|merge|pull request|diff|deploy-preview)\b/i,
+    );
     expect(confirmation.text).not.toContain('src/');
   });
 
@@ -276,8 +283,12 @@ describe('approving a previewed change', () => {
     // The change's own branch now carries the site's newer work as well as
     // its own: that is what was previewed again and what went live.
     const branch = `webagent/c-${number}`;
-    expect(await readPushedFile(harness!.originDir, branch, 'src/about.html')).toBe('<h1>About us</h1>\n');
-    expect(await readPushedFile(harness!.originDir, branch, 'src/index.html')).toBe('<h1>Built for speed</h1>\n');
+    expect(await readPushedFile(harness!.originDir, branch, 'src/about.html')).toBe(
+      '<h1>About us</h1>\n',
+    );
+    expect(await readPushedFile(harness!.originDir, branch, 'src/index.html')).toBe(
+      '<h1>Built for speed</h1>\n',
+    );
   });
 
   it('refuses, in plain words, when the site changed the same lines as the change (FR-030)', async () => {

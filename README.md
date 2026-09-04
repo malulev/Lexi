@@ -198,6 +198,18 @@ what to check: an unreachable repository, an installation that does not answer, 
 Netlify site, and a configuration credential no one could ever present. Expect explicit failure
 here rather than a silent start (FR-003b).
 
+### Several sites on one host
+
+One installation serves one website, and nothing here changes that. Several installations
+can share one machine, though: one directory, one `.env`, one Compose project per site, all
+pointed at the same Docker daemon and fronted by a reverse proxy with a hostname each.
+
+The daemon is the shared resource, so it is also the shared limit. Every agent container is
+labelled, and a request counts the running ones before starting its own; while the count is at
+`MAX_CONCURRENT_RUNS` the request waits, and the client sees "Waiting for a free turn". After
+fifteen minutes it gives up with its own sentence and nothing is published. Set the same value
+in every `.env` on the host; the count is host-wide whichever installation makes it.
+
 ---
 
 ## Running it for development

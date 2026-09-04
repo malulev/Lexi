@@ -54,7 +54,10 @@ async function startRequestOrThrow(input: StartInput): Promise<BeginOutcome> {
   // names of anything attached go with them: a page reads back what was sent.
   await client.createComment(
     input.conversationNumber,
-    renderClientMessage(input.message, input.attachments?.map((attachment) => attachment.name)),
+    renderClientMessage(
+      input.message,
+      input.attachments?.map((attachment) => attachment.name),
+    ),
   );
 
   const defaultBranch = await client.getDefaultBranch();
@@ -72,11 +75,18 @@ async function startRequestOrThrow(input: StartInput): Promise<BeginOutcome> {
       lock: installation.lock,
       mirror: installation.mirror,
       runner: installation.runner,
+      slots: installation.slots,
       netlify: installation.netlify,
       bus: installation.bus,
       env: installation.env,
       onFinished: (record, commentId) =>
-        notifyClients(installation, detail.conversation.title, input.conversationNumber, record, commentId),
+        notifyClients(
+          installation,
+          detail.conversation.title,
+          input.conversationNumber,
+          record,
+          commentId,
+        ),
       config: settings,
     },
     {
@@ -109,7 +119,10 @@ export function startDetached(input: StartInput): void {
   void startAndDetach(input)
     .then((begun) => (begun.started ? undefined : recordRefusal(input)))
     .catch((cause) => {
-      console.error(`[webagent] could not start the request on conversation ${input.conversationNumber}`, cause);
+      console.error(
+        `[webagent] could not start the request on conversation ${input.conversationNumber}`,
+        cause,
+      );
       return recordRefusal(input, 'internal_error');
     });
 }
@@ -130,9 +143,15 @@ async function recordRefusal(
     errorDetail: DEFAULT_ERROR_DETAIL[errorCode],
   };
   try {
-    await client.createComment(input.conversationNumber, renderRecord(CLIENT_MESSAGES[errorCode], record));
+    await client.createComment(
+      input.conversationNumber,
+      renderRecord(CLIENT_MESSAGES[errorCode], record),
+    );
   } catch (cause) {
-    console.error(`[webagent] could not record a refusal on conversation ${input.conversationNumber}`, cause);
+    console.error(
+      `[webagent] could not record a refusal on conversation ${input.conversationNumber}`,
+      cause,
+    );
   }
 }
 

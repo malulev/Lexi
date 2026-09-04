@@ -26,6 +26,7 @@ import type { Mailer } from '@/lib/notify/email';
 import { gate } from '@/lib/policy/gate';
 import { renderRecord } from '@/lib/record/record';
 import { writeControlDir } from '@/lib/runner/control';
+import type { AgentSlots, SlotOutcome } from '@/lib/runner/slots';
 import type { JobRunner } from '@/lib/runner/types';
 import type {
   AgentPrompt,
@@ -60,6 +61,11 @@ export interface RunDeps {
   lock: { acquire(requestId: string, maxRequestMinutes: number): Promise<AcquireResult> };
   mirror: Mirror;
   runner: JobRunner;
+  /**
+   * Host-wide agent slots (src/lib/runner/slots.ts). Absent, the request
+   * runs at once: a single-site development setup needs no queue.
+   */
+  slots?: AgentSlots;
   netlify: NetlifyClient;
   bus: JobBus;
   env: Env;
@@ -174,11 +180,27 @@ async function execute(
   const model = resolveModel(deps.config.settings, input.modelTier);
 
   try {
-    machine.advance('running');
+    // The tree is prepared at `starting`; the request only becomes `running`
+    // once the host has room for its agent. Preparing first keeps the wait
+    // short once a slot frees, and the lock is already held either way.
     const prepared = await prepare(deps, input, requestId);
     tree = prepared.tree;
     controlDir = prepared.controlDir;
 
+    const slot = await waitForSlot(deps, machine);
+    if (!slot.ok) {
+      return finish(deps, input, machine, {
+        requestId,
+        startedAt,
+        model,
+        outcome: 'failed',
+        errorCode: 'too_busy',
+        errorDetail: `no agent slot became free within ${Math.round(slot.waitedMs / 60_000)} minutes (MAX_CONCURRENT_RUNS=${deps.env.maxConcurrentRuns})`,
+        prose: null,
+      });
+    }
+
+    machine.advance('running');
     const agent = await runAgent(deps, requestId, prepared, model);
     if (agent.failure) {
       // The spend is carried into every ending, not just the successful one:
@@ -257,6 +279,19 @@ async function execute(
 // ---------------------------------------------------------------------------
 // The steps
 // ---------------------------------------------------------------------------
+
+/**
+ * Announces `queued` only to a request that actually waited: `onWait` fires
+ * the first time the host is full, never for a request that walked straight
+ * in. With no slots configured there is nothing to wait for.
+ */
+async function waitForSlot(
+  deps: RunDeps,
+  machine: { advance(stage: 'queued'): void },
+): Promise<SlotOutcome> {
+  if (!deps.slots) return { ok: true };
+  return deps.slots.acquire({ onWait: () => machine.advance('queued') });
+}
 
 interface Prepared {
   tree: WorkingTree;

@@ -10,6 +10,7 @@ import { createFakeNetlifyClient } from '@/lib/netlify/fake';
 import { createFakeMailer } from '@/lib/notify/email';
 import { DEFAULT_POLICY } from '@/lib/policy/parse';
 import { createFakeRunner, type FakeRunnerScript } from '@/lib/runner/fake';
+import type { AgentSlots } from '@/lib/runner/slots';
 import type { RunDeps } from '@/lib/jobs/run';
 import type { Mirror, WorkingTree } from '@/lib/mirror/types';
 import type { Env, RepoConfig } from '@/types';
@@ -54,9 +55,9 @@ const ENV: Env = {
   sessionSecret: 'a'.repeat(32),
   allowedEmails: ['jane@client.example'],
   // A real argon2id hash of 'fixture-configuration-password' and a base32
-// secret long enough for TOTP. A fixture that would be rejected as unusable
-// describes an installation that could not start, which is not what these
-// tests mean by one.
+  // secret long enough for TOTP. A fixture that would be rejected as unusable
+  // describes an installation that could not start, which is not what these
+  // tests mean by one.
   configPasswordHash:
     '$argon2id$v=19$m=65536,p=4,t=3$WkovnjhviO6+KrGuW0pGPw$aH1PI7KuDMSl14U1diMYqKyzdK6Uz9Vpxne+abvnzPk',
   configTotpSecret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
@@ -87,6 +88,8 @@ export interface HarnessOptions {
    * wants to see what happens when no deploy ever arrives.
    */
   previewTimeoutMs?: number;
+  /** Host-wide agent slots. Absent, every request runs at once, as before. */
+  slots?: AgentSlots;
 }
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
@@ -113,6 +116,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
     lock,
     mirror: buildMirror(root, originDir, checkouts, trees),
     runner,
+    ...(options.slots ? { slots: options.slots } : {}),
     netlify,
     bus,
     mailer,
@@ -245,8 +249,17 @@ function buildMirror(
       await tree.checkout(['-b', branch, `origin/${branch}`]);
       const before = await tree.revparse(['HEAD']);
       const merged = await tree
-        .raw(['merge', '--no-edit', `origin/${baseBranch}`, '-m', 'bring this change up to date with the site'])
-        .then(() => true, () => false);
+        .raw([
+          'merge',
+          '--no-edit',
+          `origin/${baseBranch}`,
+          '-m',
+          'bring this change up to date with the site',
+        ])
+        .then(
+          () => true,
+          () => false,
+        );
       if (!merged || (await tree.status()).conflicted.length > 0) {
         await rm(dir, { recursive: true, force: true });
         return { kind: 'conflict' };
