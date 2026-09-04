@@ -34,7 +34,7 @@ const ENV: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'webagent@client.example',
   publicBaseUrl: 'http://localhost:3000',
-};
+  maxConcurrentRuns: 2,};
 
 /**
  * A mirror that does what a test tells it: no git, because the git half is

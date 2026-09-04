@@ -156,6 +156,22 @@ describe('parseEnv', () => {
     const lineCount = thrown!.message.split('\n').filter((line) => line.trim().length > 0).length;
     expect(lineCount).toBeGreaterThanOrEqual(3);
   });
+
+  describe('MAX_CONCURRENT_RUNS', () => {
+    it('defaults to two agents at once when unset', () => {
+      expect(parseEnv(validRawEnv()).maxConcurrentRuns).toBe(2);
+    });
+
+    it('reads a positive integer', () => {
+      expect(parseEnv({ ...validRawEnv(), MAX_CONCURRENT_RUNS: '4' }).maxConcurrentRuns).toBe(4);
+    });
+
+    it.each(['0', '-1', '1.5', 'two', '17'])('rejects %s', (value) => {
+      expect(() => parseEnv({ ...validRawEnv(), MAX_CONCURRENT_RUNS: value })).toThrow(
+        /MAX_CONCURRENT_RUNS/,
+      );
+    });
+  });
 });
 
 describe('loadEnv', () => {

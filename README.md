@@ -102,6 +102,17 @@ OpenRouter key, `SMTP_URL` and `SMTP_FROM`, `PUBLIC_BASE_URL`, and:
 ALLOWED_EMAILS=jane@client.example,marketing@client.example
 ```
 
+One more variable is optional and matters only when several installations share one host:
+
+```bash
+# How many agent containers may run at once on this host's Docker daemon.
+# Counted across every installation that uses the daemon. A request that
+# arrives while the limit is reached waits its turn (the client sees
+# "Waiting for a free turn"), and gives up after fifteen minutes.
+# Default 2. Rule of thumb: one per 1 GB of RAM left after the app containers.
+MAX_CONCURRENT_RUNS=2
+```
+
 The private key can be pasted with literal `\n` sequences or wrapped in double quotes across
 several lines; both survive. Losing the `-----BEGIN`/`-----END` lines does not.
 

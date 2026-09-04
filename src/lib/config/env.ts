@@ -79,6 +79,13 @@ const rawEnvSchema = z.object({
   SMTP_URL: z.string().min(1, 'is required'),
   SMTP_FROM: z.string().min(1, 'is required'),
   PUBLIC_BASE_URL: z.url({ message: 'must be a valid absolute URL' }),
+  MAX_CONCURRENT_RUNS: z
+    .string()
+    .optional()
+    .default('2')
+    .refine((value) => /^\d+$/.test(value), 'must be a whole number')
+    .transform(Number)
+    .refine((value) => value >= 1 && value <= 16, 'must be between 1 and 16'),
 });
 
 /** One line per fault, each prefixed with the variable it names. */
@@ -109,6 +116,7 @@ function toEnv(data: z.infer<typeof rawEnvSchema>): Env {
     smtpUrl: data.SMTP_URL,
     smtpFrom: data.SMTP_FROM,
     publicBaseUrl: data.PUBLIC_BASE_URL,
+    maxConcurrentRuns: data.MAX_CONCURRENT_RUNS,
   };
 }
 
