@@ -1,15 +1,11 @@
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
 
 import { fail, failUnexpectedly, requireClient } from '@/lib/http/guard';
+import { parseChangeRequest } from '@/lib/http/parse-request';
 import { startAndDetach } from '@/lib/http/start-request';
+import { discardAttachments } from '@/lib/jobs/attachments';
 
 export const runtime = 'nodejs';
-
-const messageSchema = z.object({
-  message: z.string().trim().min(1).max(4_000),
-  targetHint: z.string().trim().max(200).optional(),
-});
 
 /**
  * Answering `409` here is the enforcement the disabled input cannot make
@@ -19,6 +15,9 @@ const messageSchema = z.object({
  *
  * Requests are refused, never queued — a queue would be a promise to do
  * something later, which is state this product does not keep.
+ *
+ * The body is JSON, or `multipart/form-data` when files are attached; the
+ * fields are the same either way (contracts/http-api.md).
  */
 export async function POST(
   request: Request,
@@ -33,21 +32,24 @@ export async function POST(
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
-  const parsed = messageSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+  const parsed = await parseChangeRequest(request);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      parsed.status === 400 ? { error: parsed.error } : { error: parsed.error, message: parsed.message },
+      { status: parsed.status },
+    );
+  }
 
   try {
     // Awaited exactly as far as the lock's answer, which is the only thing that
     // can decide between 202 and 409. The work itself outlives this response.
-    const begun = await startAndDetach({
-      conversationNumber,
-      message: parsed.data.message,
-      ...(parsed.data.targetHint ? { targetHint: parsed.data.targetHint } : {}),
-    });
+    const begun = await startAndDetach({ conversationNumber, ...parsed.body });
 
     if (!begun.started) return fail('request_in_flight');
     return NextResponse.json({ status: 'accepted', requestId: begun.requestId }, { status: 202 });
   } catch (cause) {
+    // A request that never started leaves nothing else to remove its files.
+    await discardAttachments(parsed.body.attachments);
     return failUnexpectedly(`starting a request on conversation ${conversationNumber}`, cause);
   }
 }

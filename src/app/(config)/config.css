@@ -89,6 +89,9 @@
 }
 
 .config-shell__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;

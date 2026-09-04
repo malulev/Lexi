@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 import argon2 from 'argon2';
@@ -78,4 +79,9 @@ async function main(): Promise<void> {
   console.log(lines.join('\n'));
 }
 
-void main();
+// Only when run as a script: the test suite imports `escapeForDotenv` from
+// this file, and an import that exits the process is an import that fails
+// every test after it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main();
+}

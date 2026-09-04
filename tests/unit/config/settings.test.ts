@@ -125,3 +125,56 @@ maxRequestMinutes: ${value}
     expect(() => parseSettings(atBoundary)).not.toThrow();
   });
 });
+
+/**
+ * The tier map and the upload directory are optional, and each is checked as
+ * strictly as the root: an override that is not a model, a tier that does not
+ * exist, or an upload directory that escapes the repository is a fault a
+ * developer must see, not a setting that silently never applies.
+ */
+describe('parseSettings: model tiers and the upload directory', () => {
+  it('accepts per-tier model overrides and leaves the rest to the defaults', () => {
+    const settings = parseSettings(`${VALID_YAML}
+models:
+  high: openrouter/acme/house-model
+  free: openrouter/acme/free-model
+`);
+
+    expect(settings.models).toEqual({
+      high: 'openrouter/acme/house-model',
+      free: 'openrouter/acme/free-model',
+    });
+  });
+
+  it('leaves `models` absent, not empty, when the file does not name it', () => {
+    expect('models' in parseSettings(VALID_YAML)).toBe(false);
+  });
+
+  it('rejects a tier name that does not exist, naming it', () => {
+    expect(() =>
+      parseSettings(`${VALID_YAML}
+models:
+  medum: openrouter/acme/house-model
+`),
+    ).toThrow(/medum/);
+  });
+
+  it('rejects a tier override that is not in provider/model shape', () => {
+    expect(() =>
+      parseSettings(`${VALID_YAML}
+models:
+  high: just-a-name
+`),
+    ).toThrow(/models\.high/);
+  });
+
+  it('accepts a relative upload directory and strips a trailing slash', () => {
+    expect(parseSettings(`${VALID_YAML}\nuploadDir: public/media/`).uploadDir).toBe('public/media');
+  });
+
+  it('rejects an upload directory that could name a path outside the repository', () => {
+    expect(() => parseSettings(`${VALID_YAML}\nuploadDir: /etc`)).toThrow(/uploadDir/);
+    expect(() => parseSettings(`${VALID_YAML}\nuploadDir: ../elsewhere`)).toThrow(/uploadDir/);
+    expect(() => parseSettings(`${VALID_YAML}\nuploadDir: public/../../x`)).toThrow(/uploadDir/);
+  });
+});

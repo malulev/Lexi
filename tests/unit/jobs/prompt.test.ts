@@ -190,3 +190,38 @@ describe('an attempt the policy refused', () => {
     expect(prompt.history.at(-1)!.text.toLowerCase()).toContain('refused');
   });
 });
+
+/**
+ * Attached files are placed in the tree before the agent runs, and the agent
+ * is told where. The paths ride inside the request text, like the refused
+ * paths and the build failure, so the container contract stays unchanged.
+ */
+describe('attached files', () => {
+  it('names each attached path in the request, so the agent can use the files', () => {
+    const prompt = assemblePrompt({
+      request: 'Put the new team photo on the about page.',
+      history: [],
+      guidance: '',
+      attachedPaths: ['public/uploads/team-photo.jpg'],
+    });
+
+    expect(prompt.request).toContain('Put the new team photo on the about page.');
+    expect(prompt.request).toContain('- public/uploads/team-photo.jpg');
+    expect(prompt.request).toMatch(/attached/i);
+  });
+
+  it('adds nothing when there are no attachments', () => {
+    const prompt = assemblePrompt({ request: 'x', history: [], guidance: '', attachedPaths: [] });
+    expect(prompt.request).toBe('x');
+  });
+
+  it('keeps the attachments out of the published prompt fields', () => {
+    const prompt = assemblePrompt({
+      request: 'x',
+      history: [],
+      guidance: '',
+      attachedPaths: ['public/uploads/a.png'],
+    });
+    expect(Object.keys(prompt).sort()).toEqual(['guidance', 'history', 'request']);
+  });
+});

@@ -38,6 +38,18 @@ export interface PromptInput {
    * but not what it was refused for.
    */
   refusedPaths?: string[];
+  /**
+   * Where the client's attached files now sit in the working tree, relative to
+   * its root. Paths again, and again bound for the agent alone: the agent
+   * cannot use an image it is not told the location of.
+   */
+  attachedPaths?: string[];
+  /**
+   * The globs the policy allows the change to touch. Advisory (the gate is
+   * the control), but an agent that knows the boundary stops at it instead
+   * of spending eight minutes on a favicon the gate will refuse.
+   */
+  allowedPaths?: string[];
 }
 
 export function assemblePrompt(input: PromptInput): AgentPrompt {
@@ -81,10 +93,37 @@ function renderTurn(message: Message): { author: MessageAuthor; text: string } {
 function composeRequest(input: PromptInput): string {
   const sections = [
     input.request.trim(),
+    allowedSection(input.allowedPaths),
+    attachmentSection(input.attachedPaths),
     refusalSection(input.refusedPaths),
     buildFailureSection(input.buildFailureDetail),
   ];
   return sections.filter((section) => section !== null).join('\n\n');
+}
+
+function allowedSection(allowedPaths: string[] | undefined): string | null {
+  const globs = [...new Set(allowedPaths ?? [])].filter((glob) => glob.trim() !== '');
+  if (globs.length === 0 || globs.includes('**')) return null;
+
+  return [
+    'Only files matching these patterns may be created, edited or removed. Any change ' +
+      'outside them is refused and nothing at all is kept, so if the request needs a ' +
+      'file outside them, do the part that fits and say what you could not do.',
+    ...globs.map((glob) => `- ${glob}`),
+  ].join('\n');
+}
+
+function attachmentSection(attachedPaths: string[] | undefined): string | null {
+  const paths = (attachedPaths ?? []).filter((path) => path.trim() !== '');
+  if (paths.length === 0) return null;
+
+  return [
+    'The client attached these files with this request. They are already in the ' +
+      'working tree at the paths below; use them where the request implies (for ' +
+      'example, an image to show on a page) and reference them by these paths. Do ' +
+      'not move or rename them.',
+    ...paths.map((path) => `- ${path}`),
+  ].join('\n');
 }
 
 function refusalSection(refusedPaths: string[] | undefined): string | null {

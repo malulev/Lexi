@@ -231,5 +231,39 @@ function buildMirror(
       trees.push(workingTree);
       return workingTree;
     },
+
+    // Real git, like everything else here: a conflict has to be a conflict
+    // git itself reports, not one a fake decided on.
+    async bringUpToDate(branch, baseBranch) {
+      const dir = join(root, `update-${trees.length}`);
+      await simpleGit().clone(cacheDir, dir);
+      const tree = simpleGit(dir);
+      await tree.addConfig('user.name', 'Site Editor');
+      await tree.addConfig('user.email', 'webagent@client.example');
+      await tree.addConfig('commit.gpgsign', 'false');
+      await tree.checkout(['-b', branch, `origin/${branch}`]);
+      const before = await tree.revparse(['HEAD']);
+      const merged = await tree
+        .raw(['merge', '--no-edit', `origin/${baseBranch}`, '-m', 'bring this change up to date with the site'])
+        .then(() => true, () => false);
+      if (!merged || (await tree.status()).conflicted.length > 0) {
+        await rm(dir, { recursive: true, force: true });
+        return { kind: 'conflict' };
+      }
+      const after = await tree.revparse(['HEAD']);
+      if (after === before) {
+        await rm(dir, { recursive: true, force: true });
+        return { kind: 'current' };
+      }
+      await tree.removeRemote('origin');
+      const workingTree: WorkingTree = {
+        dir,
+        branch,
+        baseSha: before,
+        dispose: () => rm(dir, { recursive: true, force: true }),
+      };
+      trees.push(workingTree);
+      return { kind: 'merged', tree: workingTree, sha: after };
+    },
   };
 }

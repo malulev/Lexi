@@ -1,5 +1,6 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { simpleGit } from 'simple-git';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SESSION_COOKIE, issueSession } from '@/lib/auth';
@@ -11,7 +12,7 @@ import type { Deploy } from '@/lib/netlify/types';
 import { createFakeMailer, type Mailer } from '@/lib/notify/email';
 import { renderRecord } from '@/lib/record';
 import type { RequestRecord } from '@/types';
-import { CONFIG, createHarness, type Harness } from './harness';
+import { CONFIG, createHarness, readPushedFile, type Harness } from './harness';
 
 /**
  * User Story 2, the half that reaches the public site: a client approves a
@@ -155,13 +156,33 @@ async function recordOutcome(
   );
 }
 
-/** A developer pushing to the site, or another conversation being published: the site moves on. */
-function advanceDefaultBranch(current: Harness): void {
-  const later = new Date(Date.now() + 60_000).toISOString();
+/**
+ * A developer pushing to the site, or another conversation being published:
+ * the site moves on. Both halves of the harness move — the bare origin, so the
+ * merge that brings the change up to date is a real one, and the fake
+ * repository client, so the ancestry check sees the site ahead.
+ */
+async function advanceDefaultBranch(current: Harness, files: Record<string, string>): Promise<void> {
+  const clone = join(current.originDir, '..', `site-${Date.now()}`);
+  await simpleGit().clone(current.originDir, clone);
+  const git = simpleGit(clone);
+  await git.addConfig('user.name', 'Developer');
+  await git.addConfig('user.email', 'dev@agency.example');
+  await git.addConfig('commit.gpgsign', 'false');
+  for (const [path, contents] of Object.entries(files)) {
+    await mkdir(join(clone, path, '..'), { recursive: true });
+    await writeFile(join(clone, path), contents, 'utf8');
+  }
+  await git.add('.');
+  await git.commit('someone else changed the site');
+  await git.push('origin', 'main');
+
+  const tip = await current.client.getRef('refs/heads/main');
+  const sha = await current.client.createLockCommit("someone else's work", tip!.sha);
   current.client.state.refs['refs/heads/main'] = {
     ref: 'refs/heads/main',
-    sha: 'someone-elses-work',
-    committedAt: later,
+    sha,
+    committedAt: new Date(Date.now() + 60_000).toISOString(),
   };
 }
 
@@ -244,17 +265,32 @@ describe('approving a previewed change', () => {
     expect(mergedState(number)).toBe(false);
   });
 
-  it('is refused when the site has moved on since the change was made (FR-030)', async () => {
+  it('brings a change up to date with a site that moved on, then publishes it (FR-030)', async () => {
     const { number } = await previewSomething();
-    advanceDefaultBranch(harness!);
+    await advanceDefaultBranch(harness!, { 'src/about.html': '<h1>About us</h1>\n' });
+
+    const response = await postApprove(number);
+
+    expect(response.status).toBe(202);
+    expect(mergedState(number)).toBe(true);
+    // The change's own branch now carries the site's newer work as well as
+    // its own: that is what was previewed again and what went live.
+    const branch = `webagent/c-${number}`;
+    expect(await readPushedFile(harness!.originDir, branch, 'src/about.html')).toBe('<h1>About us</h1>\n');
+    expect(await readPushedFile(harness!.originDir, branch, 'src/index.html')).toBe('<h1>Built for speed</h1>\n');
+  });
+
+  it('refuses, in plain words, when the site changed the same lines as the change (FR-030)', async () => {
+    const { number } = await previewSomething();
+    await advanceDefaultBranch(harness!, { 'src/index.html': '<h1>Someone else</h1>\n' });
 
     const response = await postApprove(number);
     const body = await response.json();
 
     expect(response.status).toBe(409);
-    expect(body.error).toBe('out_of_date');
+    expect(body.error).toBe('site_conflict');
     expect(body.message).toBe(
-      'Your site changed since this was made — it needs rebuilding first.',
+      'Your website changed in the same place as this one. Start a new conversation and ask for it again.',
     );
     expect(mergedState(number)).toBe(false);
   });

@@ -58,6 +58,7 @@ function createFakeRepoClient(comments: CommentInfo[]): RepoClient {
     },
     mergePullRequest: notImplemented('mergePullRequest') as RepoClient['mergePullRequest'],
     revertCommit: notImplemented('revertCommit') as RepoClient['revertCommit'],
+    compareBranches: notImplemented('compareBranches') as RepoClient['compareBranches'],
     authenticatedRemoteUrl: notImplemented(
       'authenticatedRemoteUrl',
     ) as RepoClient['authenticatedRemoteUrl'],

@@ -1,8 +1,13 @@
-# Site Editor
+# Prosel
+
+*Say what you want changed. See it before it goes live.*
 
 A client describes a change to their website in plain language. An agent makes it on a branch,
 a preview is built, and the client presses one button to publish. No diffs, no branch names, no
 build logs — and nothing reaches the live site without a person approving it.
+
+The product's name, tagline and mark live in `src/lib/brand.ts` and `src/components/Brand.tsx`;
+every client surface reads them from there.
 
 **One installation serves one website.** There is no site selector and no tenant column: you
 install this once per client site, the way you would install a self-hosted CMS. Isolation
@@ -114,9 +119,37 @@ shadowing one in `.env` — and never prints a value.
 # .webagent/config.yml — operational settings only
 alertContact: dev@agency.example
 costCeilingUsd: 2.00
-model: openrouter/anthropic/claude-sonnet-latest
+model: openrouter/anthropic/claude-sonnet-5   # runs when a request names no tier
 maxRequestMinutes: 10
+# Optional. Clients choose an effort tier in the composer, not a model; each
+# tier has a built-in model and any of them can be re-pointed here.
+models:
+  free: openrouter/cohere/north-mini-code:free
+  # low: openrouter/deepseek/deepseek-v4-flash-0731
+  # medium: openrouter/anthropic/claude-sonnet-5
+  # high: openrouter/anthropic/claude-opus-5
+  # extra: openrouter/anthropic/claude-fable-5.1
+# Optional. Where files a client attaches land in the site. Default public/uploads.
+uploadDir: public/uploads
 ```
+
+The composer offers five effort tiers — Free, Basic, Standard, Advanced, Expert — ordered by
+cost. The picker opens on the tier whose model matches `model`, and the configuration page lists
+what each tier runs. Attachments (images and PDF files, up to 10 MB each, 25 MB and five files per
+message) are committed into `uploadDir` with the change they came with, so the policy gates them
+like any other file. "Show details" under the picker (advanced mode) reveals the model each tier
+runs and an estimated cost for a small example task such as replacing a logo, and each finished
+change then shows the model and cost it actually used. The interface speaks English, Hebrew, Dutch
+and French: a switcher in the header remembers the choice in a `webagent.locale` cookie, and the
+agent's own summaries stay in whatever language the agent wrote them.
+
+The policy gate is deliberately strict about what an agent can never touch, whatever the site's
+`allow` list says: its own rules and guidance, anything the hosting runs (`netlify/**`,
+`_redirects`, `_headers`, `api/**`, `functions/**`), build-time configuration, git configuration,
+manifests and lockfiles. Symbolic links are refused outright, and by default a change may not add
+markup that loads or runs code from another origin (`forbidExternalCode: true`). Attached files
+pass the allow list only while they are byte-for-byte what the client sent; an attached SVG with
+scripting in it is refused at upload.
 
 ```yaml
 # .webagent/policy.yml — what the agent may change

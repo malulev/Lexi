@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { simpleGit, type SimpleGit, type StatusResult } from 'simple-git';
 import type { ChangedFile, ChangeKind } from '@/types';
@@ -73,6 +73,45 @@ async function diffLinesForModified(git: SimpleGit, filePath: string): Promise<n
   return Number(added ?? 0) + Number(removed ?? 0);
 }
 
+/**
+ * Text a browser could render is read once more for the gate's content rule:
+ * an addition is all new text, an edit contributes only the lines `git diff`
+ * marks as added. Binary content and deletions add nothing. Capped, because
+ * the gate reads it with regular expressions and a pathological file should
+ * cost bounded time.
+ */
+const MAX_ADDED_TEXT_CHARS = 400_000;
+
+async function addedTextFor(
+  tree: WorkingTree,
+  git: SimpleGit,
+  file: { path: string; kind: ChangeKind },
+): Promise<string | undefined> {
+  if (file.kind === 'deleted') return undefined;
+  if (file.kind === 'added') {
+    const buffer = await readFile(path.join(tree.dir, file.path));
+    return looksBinary(buffer) ? undefined : buffer.toString('utf8').slice(0, MAX_ADDED_TEXT_CHARS);
+  }
+  const diff = await git.diff(['-U0', '--no-color', '--', file.path]);
+  if (/^Binary files/m.test(diff)) return undefined;
+  return diff
+    .split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
+    .map((line) => line.slice(1))
+    .join('\n')
+    .slice(0, MAX_ADDED_TEXT_CHARS);
+}
+
+/** Whether the path is a symbolic link in the tree. A deletion has nothing to inspect. */
+async function isSymlink(
+  tree: WorkingTree,
+  file: { path: string; kind: ChangeKind },
+): Promise<boolean> {
+  if (file.kind === 'deleted') return false;
+  const stats = await lstat(path.join(tree.dir, file.path));
+  return stats.isSymbolicLink();
+}
+
 async function diffLinesFor(
   tree: WorkingTree,
   git: SimpleGit,
@@ -101,8 +140,19 @@ export const deriveChangeSet: DeriveChangeSet = async (tree: WorkingTree): Promi
 
   const files: ChangedFile[] = [];
   for (const { path: filePath, kind } of classified) {
-    const diffLines = await diffLinesFor(tree, git, { path: filePath, kind });
-    files.push({ path: filePath, kind, diffLines });
+    const file = { path: filePath, kind };
+    const symlink = await isSymlink(tree, file);
+    // A link's target is not this change's content; the gate refuses the link
+    // itself, so there is nothing to read through it.
+    const diffLines = symlink ? 1 : await diffLinesFor(tree, git, file);
+    const addedText = symlink ? undefined : await addedTextFor(tree, git, file);
+    files.push({
+      path: filePath,
+      kind,
+      diffLines,
+      ...(symlink ? { symlink } : {}),
+      ...(addedText !== undefined ? { addedText } : {}),
+    });
   }
 
   const totalDiffLines = files.reduce((sum, file) => sum + file.diffLines, 0);

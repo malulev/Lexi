@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTACHMENT_REFUSALS,
+  BRINGING_UP_TO_DATE,
   CLIENT_MESSAGES,
   CLIENT_PROSE,
   clientMessage,
@@ -9,6 +11,7 @@ import {
   messageForViolation,
   PUBLISH_REFUSALS,
   UNDO_REFUSALS,
+  PUBLICATION_IN_PROGRESS,
 } from '@/lib/jobs/messages';
 import { DEFAULT_ERROR_DETAIL } from '@/lib/jobs/run';
 import type { ErrorCode, PolicyViolation } from '@/types';
@@ -84,15 +87,19 @@ describe('every sentence a client can be shown', () => {
     // list is asserted against its sources rather than against a number that
     // would need editing every time the vocabulary grows.
     expect(sentences).toContain(INTERRUPTED_MESSAGE);
+    expect(sentences).toContain(PUBLICATION_IN_PROGRESS);
+    expect(sentences).toContain(BRINGING_UP_TO_DATE);
     for (const message of Object.values(CLIENT_MESSAGES)) expect(sentences).toContain(message);
     for (const message of Object.values(PUBLISH_REFUSALS)) expect(sentences).toContain(message);
     for (const message of Object.values(UNDO_REFUSALS)) expect(sentences).toContain(message);
+    for (const message of Object.values(ATTACHMENT_REFUSALS)) expect(sentences).toContain(message);
 
     expect(sentences.length).toBe(
       Object.keys(CLIENT_MESSAGES).length +
-        1 +
+        3 +
         Object.keys(PUBLISH_REFUSALS).length +
-        Object.keys(UNDO_REFUSALS).length,
+        Object.keys(UNDO_REFUSALS).length +
+        Object.keys(ATTACHMENT_REFUSALS).length,
     );
   });
 

@@ -199,3 +199,66 @@ describe('jobBus', () => {
     expect(typeof jobBus.publish).toBe('function');
   });
 });
+
+/**
+ * A browser that is already watching a conversation must learn that a new
+ * request began on it — a follow-up sent from that same page, a publish, or a
+ * request another device started — without reconnecting. The announcement is
+ * the conversation-level channel that makes that possible; `activeRequest`
+ * is what a reader connecting mid-request uses to find the one to follow.
+ */
+describe('announcing a request on a conversation', () => {
+  it('tells conversation listeners which request began and what kind it is', () => {
+    const bus = createJobBus();
+    const heard: unknown[] = [];
+    bus.subscribeConversation(7, (announcement) => heard.push(announcement));
+
+    bus.announce({ conversationNumber: 7, requestId: 'r1', kind: 'change' });
+
+    expect(heard).toEqual([{ conversationNumber: 7, requestId: 'r1', kind: 'change' }]);
+  });
+
+  it('does not tell listeners on another conversation', () => {
+    const bus = createJobBus();
+    const heard: unknown[] = [];
+    bus.subscribeConversation(8, (announcement) => heard.push(announcement));
+
+    bus.announce({ conversationNumber: 7, requestId: 'r1', kind: 'change' });
+
+    expect(heard).toHaveLength(0);
+  });
+
+  it('stops after unsubscribing', () => {
+    const bus = createJobBus();
+    const heard: unknown[] = [];
+    const stop = bus.subscribeConversation(7, (announcement) => heard.push(announcement));
+
+    stop();
+    bus.announce({ conversationNumber: 7, requestId: 'r1', kind: 'publish' });
+
+    expect(heard).toHaveLength(0);
+  });
+
+  it('remembers the announced request as active until it is done', () => {
+    const bus = createJobBus();
+    expect(bus.activeRequest(7)).toBeNull();
+
+    bus.announce({ conversationNumber: 7, requestId: 'p1', kind: 'publish' });
+    expect(bus.activeRequest(7)).toEqual({ conversationNumber: 7, requestId: 'p1', kind: 'publish' });
+
+    bus.publish(stageEvent('p1', 'building'));
+    expect(bus.activeRequest(7)?.requestId).toBe('p1');
+
+    bus.publish(doneEvent('p1', 'succeeded'));
+    expect(bus.activeRequest(7)).toBeNull();
+  });
+
+  it('forgets an active request when its history is cleared', () => {
+    const bus = createJobBus();
+    bus.announce({ conversationNumber: 7, requestId: 'r1', kind: 'change' });
+
+    bus.clear('r1');
+
+    expect(bus.activeRequest(7)).toBeNull();
+  });
+});

@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 
-import { readConversation, recordPublication, selectPublishState, type PublishState } from '@/lib/conversations';
-import { readChangeFreshness } from '@/lib/github/staleness';
 import { fail, failUnexpectedly, requireClient } from '@/lib/http/guard';
-import { errorBody, PUBLISH_REFUSALS } from '@/lib/jobs/messages';
-import { getInstallation, type Installation } from '@/lib/installation';
-import { notifyPublication } from '@/lib/notify/email';
+import { errorBody } from '@/lib/jobs/messages';
+import { beginPublication } from '@/lib/jobs/publication';
+import { getInstallation } from '@/lib/installation';
 
 export const runtime = 'nodejs';
 
@@ -19,33 +17,12 @@ export const runtime = 'nodejs';
  * publish. And it publishes only what a client has already been shown: a
  * conversation whose most recent request succeeded and produced a preview
  * (FR-027). There is no auto-merge and no scheduled variant of this call.
- */
-
-/**
- * A refusal to publish, in the client's language.
  *
- * These sentences are not in `CLIENT_MESSAGES` (src/lib/jobs/messages.ts)
- * because that table is the *failure* vocabulary and none of these is a
- * failure: nothing went wrong, the conversation is simply not in a state
- * where publishing means anything. They obey the same rule it does — plain
- * language, no vocabulary from the machinery underneath (Principle I).
+ * The act itself lives in src/lib/jobs/publication.ts, where it runs as a
+ * request the client can watch. This route awaits it exactly as far as the
+ * merge and the record — the irreversible part — and lets the wait for the
+ * hosting provider's build outlive the response.
  */
-function refuseToPublish(state: Exclude<PublishState, 'ready'>): NextResponse {
-  return NextResponse.json(
-    errorBody('nothing_to_publish', PUBLISH_REFUSALS[state]),
-    { status: 409 },
-  );
-}
-
-/** The client's own website, when the hosting provider will say. Absence costs a link, not a publish. */
-async function readLiveUrl(installation: Installation): Promise<string | undefined> {
-  try {
-    return (await installation.netlify.getSite())?.publicUrl;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function POST(
   _request: Request,
   context: { params: Promise<{ number: string }> },
@@ -61,53 +38,40 @@ export async function POST(
 
   try {
     const installation = getInstallation();
-    const { client } = installation;
-
-    const detail = await readConversation(client, conversationNumber);
-    if (!detail) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-
-    const state = selectPublishState(detail);
-    if (state !== 'ready') return refuseToPublish(state);
-
-    // A request still in flight is about to commit to this very branch. The
-    // lock is inspected rather than taken: this call finishes in a moment and
-    // holding it would make a publish look like a change request to the next
-    // one that asked.
-    if (await installation.lock.inspect()) return fail('request_in_flight');
-
-    const defaultBranch = await client.getDefaultBranch();
-    const freshness = await readChangeFreshness(client, {
-      branch: detail.conversation.branch,
-      defaultBranch,
-    });
-    if (freshness.outOfDate) return fail('out_of_date');
-
-    const liveUrl = await readLiveUrl(installation);
-    const merge = await client.mergePullRequest(conversationNumber);
-
-    const written = await recordPublication(client, {
-      conversationNumber,
-      kind: 'publish',
-      actor: auth.session.email,
-      at: new Date().toISOString(),
-      commitSha: merge.sha,
-      ...(liveUrl ? { liveUrl } : {}),
-    });
-
-    await notifyPublication(
-      { mailer: installation.mailer, client, env: installation.env },
+    const begun = await beginPublication(
       {
-        event: 'published',
-        conversation: { number: conversationNumber, title: detail.conversation.title },
-        commentId: written.commentId,
-        record: written.record,
-        recipients: installation.env.allowedEmails,
+        client: installation.client,
+        netlify: installation.netlify,
+        bus: installation.bus,
+        lock: installation.lock,
+        mirror: installation.mirror,
+        mailer: installation.mailer,
+        env: installation.env,
       },
+      { conversationNumber, kind: 'publish', actor: auth.session.email },
     );
+
+    if (!begun.ok && begun.reason === 'not_found') {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+    if (!begun.ok && begun.reason === 'refused') {
+      // Not a failure: nothing went wrong, the conversation is simply not in
+      // a state where publishing means anything (Principle I wording).
+      return NextResponse.json(errorBody(begun.errorCode, begun.message), { status: 409 });
+    }
+    if (!begun.ok) {
+      return begun.errorCode === 'internal_error'
+        ? failUnexpectedly(`publishing conversation ${conversationNumber}`, begun.cause)
+        : fail(begun.errorCode);
+    }
+
+    void begun.completed.catch((cause) => {
+      console.error(`[webagent] watching the build for conversation ${conversationNumber}`, cause);
+    });
 
     // Accepted, not completed: the change is in the site's source of truth and
     // the hosting provider is building it. The conversation says so.
-    return NextResponse.json({ status: 'publishing' }, { status: 202 });
+    return NextResponse.json({ status: 'publishing', requestId: begun.requestId }, { status: 202 });
   } catch (cause) {
     return failUnexpectedly(`publishing conversation ${conversationNumber}`, cause);
   }

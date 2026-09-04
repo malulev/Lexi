@@ -6,9 +6,12 @@ import {
   renderClientMessage,
 } from '@/lib/conversations';
 import { getInstallation, type Installation } from '@/lib/installation';
-import { beginRequest, type BeginOutcome } from '@/lib/jobs/run';
+import { discardAttachments } from '@/lib/jobs/attachments';
+import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
+import { beginRequest, DEFAULT_ERROR_DETAIL, type BeginOutcome } from '@/lib/jobs/run';
 import { notifyOnce } from '@/lib/notify/email';
-import type { NotificationEvent, RequestRecord } from '@/types';
+import { renderRecord } from '@/lib/record/record';
+import type { Attachment, ModelTier, NotificationEvent, RequestRecord } from '@/types';
 
 /**
  * Starting a request is the same act whether it opens a conversation or
@@ -21,9 +24,21 @@ export interface StartInput {
   conversationNumber: number;
   message: string;
   targetHint?: string;
+  modelTier?: ModelTier;
+  attachments?: Attachment[];
 }
 
 export async function startRequest(input: StartInput): Promise<BeginOutcome> {
+  try {
+    return await startRequestOrThrow(input);
+  } catch (cause) {
+    // Nothing started, so nothing downstream will remove the attachments.
+    await discardAttachments(input.attachments);
+    throw cause;
+  }
+}
+
+async function startRequestOrThrow(input: StartInput): Promise<BeginOutcome> {
   const installation = getInstallation();
   const { client, config } = installation;
 
@@ -35,8 +50,12 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
   if (!detail) throw new Error(`conversation ${input.conversationNumber} does not exist`);
 
   // The client's own words go into the conversation before the work starts, so
-  // a request interrupted by a restart still shows what was asked for.
-  await client.createComment(input.conversationNumber, renderClientMessage(input.message));
+  // a request interrupted by a restart still shows what was asked for. The
+  // names of anything attached go with them: a page reads back what was sent.
+  await client.createComment(
+    input.conversationNumber,
+    renderClientMessage(input.message, input.attachments?.map((attachment) => attachment.name)),
+  );
 
   const defaultBranch = await client.getDefaultBranch();
   const buildFailureDetail = lastBuildFailureDetail(detail.records);
@@ -67,10 +86,54 @@ export async function startRequest(input: StartInput): Promise<BeginOutcome> {
       message: input.message,
       history: detail.messages,
       ...(input.targetHint ? { targetHint: input.targetHint } : {}),
+      ...(input.modelTier ? { modelTier: input.modelTier } : {}),
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       ...(buildFailureDetail ? { buildFailureDetail } : {}),
       ...(refusedPaths.length ? { refusedPaths } : {}),
     },
   );
+}
+
+/**
+ * Starts a request without waiting for the lock's answer at all.
+ *
+ * For a brand-new conversation the route has already inspected the lock and
+ * answered the client, so everything here happens after the response. Should
+ * the lock nonetheless be held by the time it is asked for — another request
+ * squeezed in between the inspection and the acquisition — the refusal is
+ * written into the conversation as a finished request, so the client's page
+ * shows it in the same words a `409` would have carried rather than showing a
+ * message that was sent and then nothing at all.
+ */
+export function startDetached(input: StartInput): void {
+  void startAndDetach(input)
+    .then((begun) => (begun.started ? undefined : recordRefusal(input)))
+    .catch((cause) => {
+      console.error(`[webagent] could not start the request on conversation ${input.conversationNumber}`, cause);
+      return recordRefusal(input, 'internal_error');
+    });
+}
+
+async function recordRefusal(
+  input: StartInput,
+  errorCode: 'request_in_flight' | 'internal_error' = 'request_in_flight',
+): Promise<void> {
+  const { client } = getInstallation();
+  const at = new Date().toISOString();
+  const record: RequestRecord = {
+    requestId: `r_refused_${at}`,
+    startedAt: at,
+    finishedAt: at,
+    outcome: 'failed',
+    stages: [{ stage: 'failed', at }],
+    errorCode,
+    errorDetail: DEFAULT_ERROR_DETAIL[errorCode],
+  };
+  try {
+    await client.createComment(input.conversationNumber, renderRecord(CLIENT_MESSAGES[errorCode], record));
+  } catch (cause) {
+    console.error(`[webagent] could not record a refusal on conversation ${input.conversationNumber}`, cause);
+  }
 }
 
 /**

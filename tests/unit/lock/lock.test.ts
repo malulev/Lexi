@@ -103,6 +103,10 @@ class FakeRepoClient implements RepoClient {
     throw new Error('not implemented in FakeRepoClient');
   }
 
+  async compareBranches(): Promise<{ aheadBy: number; behindBy: number }> {
+    return { aheadBy: 0, behindBy: 0 };
+  }
+
   async authenticatedRemoteUrl(): Promise<string> {
     throw new Error('not implemented in FakeRepoClient');
   }

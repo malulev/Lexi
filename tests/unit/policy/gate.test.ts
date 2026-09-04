@@ -10,6 +10,7 @@ const permissivePolicy: Policy = {
   maxFilesChanged: 15,
   maxDiffLines: 800,
   forbidNewDependencies: true,
+  forbidExternalCode: true,
 };
 
 function changedFile(path: string, overrides: Partial<ChangedFile> = {}): ChangedFile {

@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   STAGE_LABELS,
+  STAGE_LABELS_BY_KIND,
   HAPPY_PATH_STAGES,
+  PUBLICATION_PATH_STAGES,
+  REQUEST_KIND_TITLES,
   describeStage,
   isSetbackStage,
   isTerminalStage,
   buildTrailSteps,
 } from '@/components/ProgressTrail';
-import type { Stage } from '@/types';
+import type { RequestKind, Stage } from '@/types';
 
 /**
  * Constitution Principle I, applied to the progress stream: the client reads
@@ -18,12 +21,31 @@ import type { Stage } from '@/types';
  * fails to type-check before it ever reaches this test.
  */
 describe('the stage-to-language vocabulary', () => {
-  const entries = Object.entries(STAGE_LABELS) as Array<[Stage, string]>;
+  const kinds = Object.keys(STAGE_LABELS_BY_KIND) as RequestKind[];
+  const entries = kinds.flatMap((kind) =>
+    (Object.entries(STAGE_LABELS_BY_KIND[kind]) as Array<[Stage, string]>).map(
+      ([stage, label]) => [stage, label, kind] as const,
+    ),
+  );
 
-  it('covers every stage with a non-empty label', () => {
-    for (const [stage, label] of entries) {
-      expect(describeStage(stage), stage).toBe(label);
+  it('covers every stage of every request kind with a non-empty label', () => {
+    expect(kinds).toEqual(['change', 'publish', 'undo']);
+    for (const [stage, label, kind] of entries) {
+      expect(describeStage(stage, kind), `${kind}/${stage}`).toBe(label);
       expect(label.length, stage).toBeGreaterThan(0);
+    }
+    expect(STAGE_LABELS_BY_KIND.change).toBe(STAGE_LABELS);
+  });
+
+  it('says something different about the same stage when the request is for something different', () => {
+    expect(describeStage('pushing', 'publish')).not.toBe(describeStage('pushing', 'change'));
+    expect(describeStage('succeeded', 'undo')).not.toBe(describeStage('succeeded', 'publish'));
+  });
+
+  it('titles the trail by what the request is for, in plain words', () => {
+    for (const kind of kinds) {
+      expect(REQUEST_KIND_TITLES[kind]).toMatch(/^Progress on /);
+      expect(REQUEST_KIND_TITLES[kind]).not.toMatch(/\b(merge|revert|deploy)\b/i);
     }
   });
 
@@ -86,6 +108,22 @@ describe('buildTrailSteps', () => {
     const steps = buildTrailSteps(['starting', 'running', 'gating', 'pushing', 'building', 'succeeded']);
     expect(steps.every((s) => s.status === 'done' || s.stage === 'succeeded')).toBe(true);
     expect(steps[steps.length - 1]).toMatchObject({ stage: 'succeeded', status: 'current' });
+  });
+
+  it('walks a publish through only the steps a publish has — no agent, no gate', () => {
+    const steps = buildTrailSteps(['starting', 'gating', 'pushing'], 'publish');
+    expect(steps.map((s) => s.stage)).toEqual(PUBLICATION_PATH_STAGES);
+    expect(steps.some((s) => s.stage === 'running')).toBe(false);
+    expect(steps.find((s) => s.stage === 'pushing')).toMatchObject({
+      status: 'current',
+      label: 'Publishing your change',
+    });
+    expect(steps.at(-1)).toMatchObject({ stage: 'succeeded', label: 'Live on your website', status: 'pending' });
+  });
+
+  it('stops a publish honestly when the site moved on', () => {
+    const steps = buildTrailSteps(['starting', 'gating', 'failed'], 'publish');
+    expect(steps.map((s) => s.stage)).toEqual(['starting', 'gating', 'failed']);
   });
 });
 

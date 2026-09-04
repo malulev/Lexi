@@ -20,14 +20,39 @@ export const CLIENT_MESSAGES: Record<ErrorCode, string> = {
   build_failed: 'The change broke the site build. I can try to fix it.',
   site_unreachable: "Can't reach your website's hosting right now.",
   cost_ceiling: 'That request was larger than this site’s limit allows.',
-  out_of_date: 'Your site changed since this was made — it needs rebuilding first.',
+  out_of_date: 'Your website changed while this was being saved. Try again in a moment.',
   nothing_to_change: 'Nothing needed changing for that.',
   nothing_to_publish: 'There is nothing ready to publish here.',
   nothing_to_undo: 'There is nothing here to undo.',
   site_moved_on:
     'Your website has changed since this went live, so undoing it now would take those newer changes with it.',
+  site_conflict:
+    'Your website changed in the same place as this one. Start a new conversation and ask for it again.',
   internal_error: 'Something went wrong on my side. Nothing was published.',
 };
+
+/**
+ * Why an attached file was not taken. These answer a `400` before any request
+ * starts, and are shown in the composer as well so a client learns the limit
+ * before pressing Send rather than after.
+ */
+export const ATTACHMENT_REFUSALS = {
+  too_large: 'That file is too large. Each file must be 10 MB or smaller.',
+  too_many: 'You can attach up to 5 files at a time.',
+  total_too_large: 'Those files add up to more than 25 MB. Try fewer or smaller files.',
+  unsupported: 'That kind of file cannot be attached. Images and PDF files work.',
+  empty: 'That file is empty.',
+  unsafe_svg: 'That image contains scripting, so it cannot be attached. A plain image works.',
+} as const;
+
+export type AttachmentRefusal = keyof typeof ATTACHMENT_REFUSALS;
+
+/**
+ * What the composer says while a publish is bringing a change up to date with
+ * a website that moved on since the preview was made. Nothing here names how.
+ */
+export const BRINGING_UP_TO_DATE =
+  'Your website changed since this preview was made. Bringing your change up to date first.';
 
 /**
  * The one ending with no error code of its own.
@@ -64,12 +89,22 @@ export const UNDO_REFUSALS = {
   unavailable: 'Nothing from this conversation is live, so there is nothing to undo.',
 } as const;
 
+/**
+ * Why the buttons are resting while a publish or an undo is being built.
+ * `request_in_flight` says a *change* is being applied, which would be the
+ * wrong sentence here: nothing is being changed, the site is being built.
+ */
+export const PUBLICATION_IN_PROGRESS = 'Your website is being built — one moment.';
+
 /** Every sentence a client can be shown when something does not go ahead. */
 export const CLIENT_PROSE: readonly string[] = [
   ...Object.values(CLIENT_MESSAGES),
   INTERRUPTED_MESSAGE,
+  PUBLICATION_IN_PROGRESS,
+  BRINGING_UP_TO_DATE,
   ...Object.values(PUBLISH_REFUSALS),
   ...Object.values(UNDO_REFUSALS),
+  ...Object.values(ATTACHMENT_REFUSALS),
 ];
 
 /** The HTTP status each code answers with, per contracts/http-api.md. */
@@ -85,6 +120,7 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   nothing_to_publish: 409,
   nothing_to_undo: 409,
   site_moved_on: 409,
+  site_conflict: 409,
   internal_error: 500,
 };
 

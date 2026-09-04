@@ -41,15 +41,26 @@ export interface Installation {
 const AGENT_IMAGE = process.env.AGENT_IMAGE ?? 'webagent/agent:latest';
 const STATE_DIR = process.env.WEBAGENT_STATE_DIR ?? '/var/lib/webagent';
 
-let installation: Installation | null = null;
+// On `globalThis` for the same reason the bus is (src/lib/jobs/bus.ts): the
+// mirror, the lock and the configuration cache must be one per process, not
+// one per route bundle.
+const INSTALLATION_KEY = Symbol.for('webagent.installation');
+const globalWithInstallation = globalThis as typeof globalThis & {
+  [INSTALLATION_KEY]?: Installation | null;
+};
+
+function current(): Installation | null {
+  return globalWithInstallation[INSTALLATION_KEY] ?? null;
+}
 
 export function getInstallation(): Installation {
-  if (installation) return installation;
+  const existing = current();
+  if (existing) return existing;
 
   const env = loadEnv();
   const client = createRepoClient(env);
 
-  installation = {
+  const installation: Installation = {
     env,
     client,
     netlify: createNetlifyClient(env),
@@ -57,6 +68,9 @@ export function getInstallation(): Installation {
       remoteUrl: () => client.authenticatedRemoteUrl(),
       cacheDir: join(STATE_DIR, 'mirror'),
       workRoot: join(STATE_DIR, 'work'),
+      // The same identity the orchestrator commits under, so a merge made
+      // while publishing reads as the product's in the site's history.
+      author: { name: 'Site Editor', email: env.smtpFrom },
     }),
     runner: createDockerRunner({ image: AGENT_IMAGE, apiKey: env.openrouterApiKey }),
     mailer: createMailer(env),
@@ -65,10 +79,11 @@ export function getInstallation(): Installation {
     config: createConfigCache(createConfigLoader(client)),
   };
 
+  globalWithInstallation[INSTALLATION_KEY] = installation;
   return installation;
 }
 
 /** Lets a test substitute the whole installation, since nothing else selects a site. */
 export function setInstallation(replacement: Installation | null): void {
-  installation = replacement;
+  globalWithInstallation[INSTALLATION_KEY] = replacement;
 }

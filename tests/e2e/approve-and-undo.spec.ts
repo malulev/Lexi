@@ -41,7 +41,7 @@ test.describe('publishing a previewed change, and taking it back', () => {
 
   test('publishes only after a second, differently worded confirmation', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link').first().click();
+    await page.getByRole('list').getByRole('link').first().click();
 
     // Principle II: the first press asks a question, it does not publish.
     await page.getByRole('button', { name: 'Approve & Deploy' }).click();
@@ -56,7 +56,7 @@ test.describe('publishing a previewed change, and taking it back', () => {
 
   test('reaches the live site, and the offer becomes undo', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link').first().click();
+    await page.getByRole('list').getByRole('link').first().click();
 
     const before = await readLiveSite();
 
@@ -76,7 +76,7 @@ test.describe('publishing a previewed change, and taking it back', () => {
 
   test('puts the live site back within three minutes of pressing undo', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link').first().click();
+    await page.getByRole('list').getByRole('link').first().click();
 
     const published = await readLiveSite();
 
@@ -98,7 +98,7 @@ test.describe('publishing a previewed change, and taking it back', () => {
 
   test('never names a commit or a branch while doing any of it', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link').first().click();
+    await page.getByRole('list').getByRole('link').first().click();
 
     const visible = await page.locator('body').innerText();
 

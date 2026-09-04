@@ -8,7 +8,7 @@
  * process.
  */
 
-import { NotFoundError, RefAlreadyExistsError, type RepoClient } from '@/lib/github/types';
+import { isNotFoundError, isRefAlreadyExistsError, type RepoClient } from '@/lib/github/types';
 
 export const LOCK_REF = 'refs/webagent/lock';
 
@@ -91,7 +91,7 @@ async function releaseRef(client: RepoClient, ref: string): Promise<void> {
     // idempotency here is load-bearing, not a nicety. A missing ref is the
     // expected case; anything else is logged so a genuine transport fault is
     // not silently invisible.
-    if (!(error instanceof NotFoundError)) {
+    if (!isNotFoundError(error)) {
       console.error('lock release failed; ref may remain held', { ref, error });
     }
   }
@@ -125,7 +125,7 @@ async function breakStaleLock(
   try {
     await client.createRef(LOCK_REF, preparedLockSha);
   } catch (error) {
-    if (!(error instanceof RefAlreadyExistsError)) throw error;
+    if (!isRefAlreadyExistsError(error)) throw error;
     // Another process broke and re-acquired the same stale lock first.
     const raced = await client.getRef(LOCK_REF);
     return { ok: false, reason: 'held', heldSince: raced?.committedAt ?? startedAt };
@@ -178,7 +178,7 @@ export function createLock(client: RepoClient, deps?: { now?: () => Date }) {
       await client.createRef(LOCK_REF, lockSha);
       return { ok: true, handle: makeHandle(client, requestId, startedAt) };
     } catch (error) {
-      if (!(error instanceof RefAlreadyExistsError)) throw error;
+      if (!isRefAlreadyExistsError(error)) throw error;
       return resolveContestedAcquire(client, requestId, startedAt, lockSha, maxRequestMinutes, now());
     }
   }

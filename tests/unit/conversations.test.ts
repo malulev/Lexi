@@ -126,6 +126,26 @@ describe('readConversation', () => {
     expect(detail!.messages[0]!.text).not.toContain('webagent:v1');
   });
 
+  it('carries the model and cost a record reports, and nothing of the kind on a client turn', async () => {
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+    const number = await openConversation(client);
+    await client.createComment(number, renderClientMessage('Make the headline shorter'));
+    await client.createComment(
+      number,
+      renderRecord(
+        'Your preview is ready.',
+        recordFor({ model: 'openrouter/anthropic/claude-sonnet-5', costUsd: 0.41 }),
+      ),
+    );
+
+    const detail = await readConversation(client, number);
+
+    expect(detail!.messages[0]).not.toHaveProperty('model');
+    expect(detail!.messages[0]).not.toHaveProperty('costUsd');
+    expect(detail!.messages[1]!.model).toBe('openrouter/anthropic/claude-sonnet-5');
+    expect(detail!.messages[1]!.costUsd).toBe(0.41);
+  });
+
   it('derives the same records and last record comment whatever else was posted', async () => {
     const client = createFakeRepoClient({ defaultBranch: 'main' });
     const number = await openConversation(client);
@@ -219,5 +239,36 @@ describe('collectRefusedPaths', () => {
 
     expect(collectRefusedPaths(detail!.records)).toEqual(['README.md']);
     expect(JSON.stringify(detail!.messages)).not.toContain('README.md');
+  });
+});
+
+describe('claiming a branch when the error class crosses a bundle boundary', () => {
+  it('still treats a same-named error from another copy of the module as "already exists"', async () => {
+    const { createFakeRepoClient } = await import('@/lib/github/fake');
+    const { claimConversationBranch } = await import('@/lib/conversations');
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+    const base = await client.getRef('refs/heads/main');
+
+    // A foreign copy of RefAlreadyExistsError: same name, different class identity.
+    class ForeignRefAlreadyExistsError extends Error {
+      constructor() {
+        super('ref already exists');
+        this.name = 'RefAlreadyExistsError';
+      }
+    }
+    let attempts = 0;
+    const flaky = {
+      ...client,
+      async createRef(ref: string, sha: string) {
+        attempts += 1;
+        if (attempts === 1) throw new ForeignRefAlreadyExistsError();
+        return client.createRef(ref, sha);
+      },
+    };
+
+    const claimed = await claimConversationBranch(flaky, base!.sha);
+
+    expect(attempts).toBe(2);
+    expect(claimed.branch).toBe('webagent/c-2');
   });
 });

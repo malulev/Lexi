@@ -3,6 +3,8 @@ import { cookies } from 'next/headers';
 import { CONFIG_SESSION_COOKIE, verifyConfigSession } from '@/lib/auth/config-credential';
 import { getInstallation } from '@/lib/installation';
 
+import { BrandMark } from '@/components/Brand';
+import { BRAND } from '@/lib/brand';
 import { ConfigSignIn } from './ConfigSignIn';
 import { signOutOfConfig } from './actions';
 import './config.css';
@@ -26,7 +28,10 @@ export default async function ConfigLayout({ children }: { children: React.React
   return (
     <div className="config-shell">
       <header className="config-shell__header">
-        <span className="config-shell__brand">Configuration</span>
+        <span className="config-shell__brand">
+          <BrandMark size={20} />
+          {BRAND.name} · Configuration
+        </span>
         <form action={signOutOfConfig}>
           <button className="config-shell__lock" type="submit">
             Lock

@@ -10,7 +10,7 @@
       "Bash(head .env*)",
       "Bash(tail .env*)",
       "Bash(less .env*)",
-      "Bash(grep:*.env*)"
+      "Bash(grep .env*)"
     ]
   }
 }

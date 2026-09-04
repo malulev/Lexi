@@ -86,8 +86,12 @@ async function completeSignIn(request: Request): Promise<NextResponse> {
   return response;
 }
 
+/**
+ * Answers a form post, so the reply is a redirect: a browser that submitted
+ * the sign-out form should land on the sign-in page, not on an empty screen.
+ */
 function logout(): NextResponse {
-  const response = new NextResponse(null, { status: 204 });
+  const response = NextResponse.redirect(new URL('/login', getInstallation().env.publicBaseUrl), 303);
   response.cookies.set(SESSION_COOKIE, '', {
     ...sessionCookieOptions(getInstallation().env),
     maxAge: 0,

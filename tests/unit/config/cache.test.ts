@@ -19,6 +19,7 @@ function makeConfig(model: string): RepoConfig {
       maxFilesChanged: 15,
       maxDiffLines: 800,
       forbidNewDependencies: true,
+  forbidExternalCode: true,
     },
     guidance: '',
   };

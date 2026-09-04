@@ -47,6 +47,24 @@ export class NotFoundError extends Error {
   }
 }
 
+/**
+ * Recognise these errors by name, never by `instanceof`.
+ *
+ * The installation is one object per process (src/lib/installation.ts), but
+ * this module is not one module per process: the framework bundles each
+ * route separately, so the client that throws lives in one bundle and the
+ * caller that catches may live in another, each holding its own copy of the
+ * class. `instanceof` across that seam is false, and a refusal the caller was
+ * written to handle becomes a crash. The name survives the seam.
+ */
+export function isRefAlreadyExistsError(error: unknown): error is RefAlreadyExistsError {
+  return error instanceof Error && error.name === 'RefAlreadyExistsError';
+}
+
+export function isNotFoundError(error: unknown): error is NotFoundError {
+  return error instanceof Error && error.name === 'NotFoundError';
+}
+
 export interface RepoClient {
   /** File contents at a ref, or `null` when the file does not exist. */
   readFile(path: string, ref?: string): Promise<string | null>;
@@ -91,6 +109,14 @@ export interface RepoClient {
   mergePullRequest(number: number): Promise<{ sha: string }>;
   /** Reverts a merge on the default branch. Returns the revert commit. */
   revertCommit(sha: string, branch: string): Promise<{ sha: string }>;
+
+  /**
+   * How two branches relate by ancestry: `aheadBy` commits reachable from
+   * `head` but not `base`, `behindBy` the reverse. Both short branch names.
+   * This is what lets "has the site moved on since this change was made?"
+   * be answered exactly rather than guessed from commit timestamps.
+   */
+  compareBranches(base: string, head: string): Promise<{ aheadBy: number; behindBy: number }>;
 
   /** The authenticated remote URL, held by the host and never by the container. */
   authenticatedRemoteUrl(): Promise<string>;

@@ -54,6 +54,8 @@ const VIOLATION_VALUES: PolicyViolation[] = [
   'too_many_files',
   'too_many_lines',
   'new_dependency',
+  'symlink',
+  'external_code',
 ];
 
 const ERROR_CODE_VALUES: ErrorCode[] = [
@@ -172,7 +174,9 @@ function splitBody(body: string): { prose: string; record?: RequestRecord } {
   }
 
   const beforeMarker = body.slice(0, openIndex);
-  const prose = beforeMarker.endsWith(SEPARATOR) ? beforeMarker.slice(0, -SEPARATOR.length) : beforeMarker;
+  const prose = beforeMarker.endsWith(SEPARATOR)
+    ? beforeMarker.slice(0, -SEPARATOR.length)
+    : beforeMarker;
   return { prose, record };
 }
 

@@ -246,6 +246,36 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
   return { sha: revertSha };
 }
 
+/** Every commit reachable from `sha` through the fake's own parent links. */
+function ancestorsOf(ctx: Ctx, sha: string | undefined): Set<string> {
+  const seen = new Set<string>();
+  const queue = sha ? [sha] : [];
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    queue.push(...(ctx.state.commits[current]?.parents ?? []));
+  }
+  return seen;
+}
+
+/**
+ * Modelled by walking parent links rather than by comparing timestamps, so a
+ * test that advances the default branch past a conversation sees the same
+ * answer the real compare endpoint would give.
+ */
+async function compareBranches(
+  ctx: Ctx,
+  base: string,
+  head: string,
+): Promise<{ aheadBy: number; behindBy: number }> {
+  const baseAncestors = ancestorsOf(ctx, ctx.state.refs[headsRef(base)]?.sha);
+  const headAncestors = ancestorsOf(ctx, ctx.state.refs[headsRef(head)]?.sha);
+  const aheadBy = [...headAncestors].filter((sha) => !baseAncestors.has(sha)).length;
+  const behindBy = [...baseAncestors].filter((sha) => !headAncestors.has(sha)).length;
+  return { aheadBy, behindBy };
+}
+
 async function authenticatedRemoteUrl(): Promise<string> {
   return 'https://x-access-token:fake-installation-token@github.com/fake-owner/fake-repo.git';
 }
@@ -278,6 +308,7 @@ export function createFakeRepoClient(seed?: FakeRepoClientSeed): RepoClient & { 
     updateComment: (commentId, body) => updateComment(ctx, commentId, body),
     mergePullRequest: (number) => mergePullRequest(ctx, number),
     revertCommit: (sha, branch) => revertCommit(ctx, sha, branch),
+    compareBranches: (base, head) => compareBranches(ctx, base, head),
     authenticatedRemoteUrl,
     state,
   };

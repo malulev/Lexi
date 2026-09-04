@@ -35,6 +35,7 @@ deny:
 maxFilesChanged: 5
 maxDiffLines: 200
 forbidNewDependencies: false
+forbidExternalCode: false
 `;
 
     expect(parsePolicy(source)).toEqual({
@@ -43,6 +44,7 @@ forbidNewDependencies: false
       maxFilesChanged: 5,
       maxDiffLines: 200,
       forbidNewDependencies: false,
+      forbidExternalCode: false,
     });
   });
 

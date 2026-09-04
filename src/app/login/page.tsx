@@ -2,6 +2,11 @@
 
 import { useState } from 'react';
 import type { FormEvent } from 'react';
+
+import { Wordmark } from '@/components/Brand';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { useTranslation } from '@/components/LocaleProvider';
+import { BRAND } from '@/lib/brand';
 import '@/components/client.css';
 
 /**
@@ -13,6 +18,7 @@ import '@/components/client.css';
  * simply that a link is on its way, if there was one to send.
  */
 export default function LoginPage() {
+  const { t, fill, fillNodes } = useTranslation();
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
@@ -33,7 +39,7 @@ export default function LoginPage() {
       });
       setSent(true);
     } catch {
-      setError('Could not reach the site editor just now. Please try again in a moment.');
+      setError(fill(t.login.couldNotReach, { name: BRAND.name }));
     } finally {
       setSending(false);
     }
@@ -41,30 +47,40 @@ export default function LoginPage() {
 
   return (
     <main className="login">
-      <div className="login__panel">
-        <div className="login__pitch">
-          <p className="login__brand">Site Editor</p>
-          <h1>Describe a change. See it before it goes live.</h1>
-          <p>
-            Tell us what you would like changed about your website in your own words. You will get a
-            private preview to look at, and nothing reaches your live site until you say so.
-          </p>
-        </div>
+      <section className="login__pitch">
+        <Wordmark size={30} />
 
-        <div className="login__form-panel">
+        <h1 className="login__headline">
+          {t.login.headline}
+          <em> {t.login.headlineEm}</em>
+        </h1>
+        <p className="login__lede">{fill(t.login.lede, { name: BRAND.name })}</p>
+
+        <LoginDemo />
+      </section>
+
+      <section className="login__form-panel">
+        <div className="login__lang">
+          <LanguageSwitcher />
+        </div>
+        <div className="login__card">
           {sent ? (
-            <div className="login__sent">
-              <h2>Check your email</h2>
-              <p>
-                If <strong>{email.trim()}</strong> is allowed to edit this website, a sign-in link is
-                on its way. It works for the next 15 minutes.
-              </p>
+            <div className="login__sent" role="status">
+              <span className="login__sent-mark" aria-hidden="true">
+                ✓
+              </span>
+              <h2>{t.login.checkEmail}</h2>
+              <p>{fillNodes(t.login.linkOnItsWay, { email: <strong>{email.trim()}</strong> })}</p>
+              <button type="button" className="login__again" onClick={() => setSent(false)}>
+                {t.login.useDifferent}
+              </button>
             </div>
           ) : (
             <form className="login__form" onSubmit={submit}>
-              <h2>Sign in</h2>
+              <h2>{t.login.signIn}</h2>
+              <p className="login__form-hint">{t.login.noPassword}</p>
               <label className="login__label" htmlFor="email">
-                Your email address
+                {t.login.yourEmail}
               </label>
               <input
                 id="email"
@@ -72,18 +88,60 @@ export default function LoginPage() {
                 type="email"
                 autoComplete="email"
                 required
+                autoFocus
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                placeholder="you@yourcompany.com"
+                placeholder={t.login.emailPlaceholder}
+                dir="ltr"
               />
               <button className="login__submit" type="submit" disabled={sending}>
-                {sending ? 'Sending…' : 'Email me a sign-in link'}
+                {sending ? t.login.sending : t.login.emailMe}
               </button>
-              {error ? <p className="login__error">{error}</p> : null}
+              {error ? (
+                <p className="login__error" role="alert">
+                  {error}
+                </p>
+              ) : null}
             </form>
           )}
         </div>
-      </div>
+      </section>
     </main>
+  );
+}
+
+/**
+ * The product in one exchange: a sentence in, a preview out, and a trail
+ * that ends at "Ready to look at". Decorative for a screen reader, so hidden
+ * from one — the words above already say what it shows.
+ */
+function LoginDemo() {
+  const { t } = useTranslation();
+  const stages = t.stages.change;
+  const steps = [
+    stages.starting,
+    stages.running,
+    stages.gating,
+    stages.pushing,
+    stages.building,
+    stages.succeeded,
+  ];
+  return (
+    <div className="demo" aria-hidden="true">
+      <p className="demo__bubble demo__bubble--client">{t.login.demoClient}</p>
+      <p className="demo__bubble demo__bubble--agent">{t.login.demoAgent}</p>
+      <ol className="demo__trail">
+        {steps.map((step, index) => (
+          <li
+            key={step}
+            className={`demo__step${index === steps.length - 1 ? ' demo__step--current' : ''}`}
+            style={{ animationDelay: `${index * 0.35}s` }}
+          >
+            <span className="demo__dot" />
+            {step}
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }

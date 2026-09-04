@@ -8,12 +8,23 @@ contract; changing their shape breaks installations.
 ```yaml
 alertContact: dev@agency.example
 costCeilingUsd: 2.00
-model: openrouter/anthropic/claude-sonnet-latest
+model: openrouter/anthropic/claude-sonnet-5
 maxRequestMinutes: 10
+# optional
+models:
+  free: openrouter/cohere/north-mini-code:free
+  high: openrouter/anthropic/claude-opus-5
+uploadDir: public/uploads
 ```
 
-Every field required. Unknown fields are rejected rather than ignored, so a typo fails loudly
-instead of being silently ignored.
+The first four fields are required. Unknown fields are rejected rather than ignored, so a typo
+fails loudly instead of being silently ignored — inside `models:` too, where the only keys are
+the five tiers `free`, `low`, `medium`, `high`, `extra`.
+
+`model` runs when a request names no tier. `models` re-points any tier away from its built-in
+model (src/lib/models.ts holds the defaults); every value is `provider/model`. `uploadDir` is
+where a client's attached files are written, relative to the repository root and never escaping
+it; default `public/uploads`. Attachments are ordinary files to the policy and the commit.
 
 **Permitted sign-ins are not here.** They are deployment configuration (`ALLOWED_EMAILS`), so
 that write access to the site's repository cannot grant access to the editing interface
@@ -36,22 +47,42 @@ deny:
 maxFilesChanged: 15
 maxDiffLines: 800
 forbidNewDependencies: true
+forbidExternalCode: true
 ```
 
 All fields optional; defaults in [../data-model.md](../data-model.md).
 
 **Evaluation order**, and the order matters:
 
-1. Unconditional denies — `.webagent/**`, `AGENTS.md`, `**/.env*`, `.github/**`, `netlify.toml`,
-   dependency manifests and lockfiles. A site cannot allow these.
+0. Path shape and symbolic links. A path that is not plainly repository-relative, or that is a
+   symbolic link in the working tree, is refused before any glob is read (`protected_path`,
+   `symlink`). A link named like an allowed file publishes whatever it points at.
+1. Unconditional denies — `.webagent/**`, `AGENTS.md`, `**/.env*`, `.github/**`; everything the
+   hosting runs or is told to run (`netlify.toml`, `netlify/**`, `_redirects`, `_headers`,
+   `vercel.json`, `api/**`, `functions/**`, `wrangler.toml`); build-time configuration
+   (`*.config.js|ts`, `tsconfig*.json`, `.npmrc`, `.husky/**`, `Dockerfile`, `*.sh`); git's own
+   configuration (`.gitmodules`, `.gitattributes`); dependency manifests and lockfiles. A site
+   cannot allow these.
 2. Site `deny`.
-3. Site `allow`. A path matching nothing in `allow` is denied.
+3. Site `allow`. A path matching nothing in `allow` is denied — except a file the host itself
+   placed for the client as an attachment (see `uploadDir`), while it is still byte-for-byte what
+   the client sent. An attachment the agent rewrote, removed or replaced is the agent's change and
+   is judged like any other. Attachments are still subject to rules 0–2 and 4–6.
 4. Size limits: `maxFilesChanged`, `maxDiffLines`.
 5. `forbidNewDependencies`: any change to a manifest or lockfile — already denied by rule 1, so
    this exists to catch vendored dependency directories.
+6. `forbidExternalCode` (default on): the text a change *adds* to a page (`.html`, `.svg`, `.md`,
+   component templates) may not load or run anything from another origin — no off-site
+   `<script src>`, no `<iframe>`/`<object>`/`<embed>`, no `<meta http-equiv="refresh">`, no
+   `<base>`, no `javascript:` URL. Stylesheets, images and ordinary links are untouched; a site
+   that wants an embedded map or an analytics tag sets `forbidExternalCode: false`.
 
 **Result**: `{ ok: true }` or `{ ok: false, violation, path?, actual?, limit? }`. The violation
 must name the offending path so the client-facing message can say which area is protected.
+
+The agent is told the `allow` globs in its prompt (advisory: it saves a run that would be refused
+anyway), and an attached SVG is refused at upload if it contains scripting, event handlers,
+`javascript:` URLs, `<foreignObject>`, off-site references or entity declarations.
 
 ## `AGENTS.md`
 

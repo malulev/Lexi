@@ -15,6 +15,20 @@ export interface WorkingTree {
   dispose(): Promise<void>;
 }
 
+/**
+ * What bringing a change up to date with the site produced.
+ *
+ * `current`: nothing to do, the branch already contains the site's tip.
+ * `merged`: a merge commit now sits on the branch in `tree`, unpushed; the
+ * caller pushes it and disposes of the tree. `conflict`: the site and the
+ * change edit the same lines, which no host-side merge can settle; nothing
+ * was left behind.
+ */
+export type UpToDateOutcome =
+  | { kind: 'current' }
+  | { kind: 'conflict' }
+  | { kind: 'merged'; tree: WorkingTree; sha: string };
+
 export interface Mirror {
   /** Creates or updates the bare mirror, rebuilding it when corrupt. */
   sync(): Promise<void>;
@@ -23,6 +37,13 @@ export interface Mirror {
    * branch does not yet exist.
    */
   checkout(branch: string, baseBranch: string): Promise<WorkingTree>;
+  /**
+   * Merges `baseBranch`'s tip into `branch` in a fresh working tree, with the
+   * host as author (FR-030: "update it before publishing"). The container is
+   * never involved: this is the host's own git, on a tree the agent never
+   * touched.
+   */
+  bringUpToDate(branch: string, baseBranch: string): Promise<UpToDateOutcome>;
 }
 
 export interface ChangeSet {

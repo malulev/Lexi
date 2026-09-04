@@ -1,7 +1,7 @@
-import { RefAlreadyExistsError } from '@/lib/github/types';
+import { isRefAlreadyExistsError } from '@/lib/github/types';
 import type { CommentInfo, PullRequestInfo, RepoClient } from '@/lib/github/types';
 import { parseComment, renderRecord } from '@/lib/record/record';
-import type { Conversation, Message, RequestRecord } from '@/types';
+import type { Conversation, Message, RequestKind, RequestRecord } from '@/types';
 
 /**
  * A conversation *is* a pull request, and a message *is* a comment. Nothing
@@ -63,15 +63,23 @@ export async function claimConversationBranch(
       await client.createRef(`refs/heads/${branch}`, sha);
       return { branch, sha };
     } catch (cause) {
-      if (!(cause instanceof RefAlreadyExistsError)) throw cause;
+      if (!isRefAlreadyExistsError(cause)) throw cause;
     }
   }
 
   throw new Error('could not claim a branch name for a new conversation');
 }
 
-export function renderClientMessage(text: string): string {
-  return `${CLIENT_MARKER}\n${text.trim()}`;
+/**
+ * The client's turn, as it is written into the conversation. Attached files
+ * are named after the words, by the names the client gave them: the names are
+ * the client's own vocabulary, and a turn that silently dropped them would
+ * read back as a request the agent answered with images from nowhere.
+ */
+export function renderClientMessage(text: string, attachmentNames: string[] = []): string {
+  const names = attachmentNames.map((name) => name.trim()).filter((name) => name.length > 0);
+  const attached = names.length > 0 ? `\n\nAttached: ${names.join(', ')}` : '';
+  return `${CLIENT_MARKER}\n${text.trim()}${attached}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +180,8 @@ function toMessage(comment: CommentInfo, record: RequestRecord | undefined): Mes
       outcome: record.outcome,
       ...(record.errorCode ? { errorCode: record.errorCode } : {}),
       ...(record.previewUrl ? { previewUrl: record.previewUrl } : {}),
+      ...(record.model ? { model: record.model } : {}),
+      ...(record.costUsd !== undefined ? { costUsd: record.costUsd } : {}),
     };
   }
 
@@ -259,9 +269,20 @@ export type PublishState =
   | 'unavailable';
 
 function publicationKindOf(record: RequestRecord): PublicationKind | null {
-  if (record.requestId.startsWith(PUBLISH_REQUEST_PREFIX)) return 'publish';
-  if (record.requestId.startsWith(UNDO_REQUEST_PREFIX)) return 'undo';
-  return null;
+  const kind = requestKindOf(record.requestId);
+  return kind === 'change' ? null : kind;
+}
+
+/** What a request was for, read back from the identifier its record carries. */
+export function requestKindOf(requestId: string): RequestKind {
+  if (requestId.startsWith(PUBLISH_REQUEST_PREFIX)) return 'publish';
+  if (requestId.startsWith(UNDO_REQUEST_PREFIX)) return 'undo';
+  return 'change';
+}
+
+/** The identifier a publish or an undo runs under, on the bus and in its record alike. */
+export function publicationRequestId(kind: PublicationKind, at: string): string {
+  return `${kind === 'publish' ? PUBLISH_REQUEST_PREFIX : UNDO_REQUEST_PREFIX}${at}`;
 }
 
 /**
@@ -293,9 +314,8 @@ export function buildPublicationRecord(input: {
   /** Machine-readable only — it is in the block, never in the prose above it. */
   commitSha?: string;
 }): RequestRecord {
-  const prefix = input.kind === 'publish' ? PUBLISH_REQUEST_PREFIX : UNDO_REQUEST_PREFIX;
   return {
-    requestId: `${prefix}${input.at}`,
+    requestId: publicationRequestId(input.kind, input.at),
     startedAt: input.at,
     finishedAt: input.at,
     outcome: 'succeeded',

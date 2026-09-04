@@ -221,3 +221,65 @@ describe('createMirror().checkout', () => {
     await expect(tree.dispose()).resolves.not.toThrow();
   });
 });
+
+/**
+ * FR-030, the "update it before publishing" half: the site's tip is merged
+ * into a change by the host, in a tree of its own, or reported as a conflict
+ * when git itself cannot settle it.
+ */
+describe('createMirror().bringUpToDate', () => {
+  async function openChange(h: Harness, file: string, content: string): Promise<void> {
+    await h.remoteGit.checkoutLocalBranch('webagent/c-1');
+    await commitFile(h.remoteGit, h.remoteDir, file, content, 'the change');
+    await h.remoteGit.checkout('main');
+  }
+
+  it('reports a change that already contains the site’s tip as current, leaving nothing behind', async () => {
+    const h = await harness();
+    await openChange(h, 'hero.html', '<h2>hero</h2>\n');
+    await h.mirror.sync();
+
+    expect(await h.mirror.bringUpToDate('webagent/c-1', 'main')).toEqual({ kind: 'current' });
+    const { readdir } = await import('node:fs/promises');
+    expect(await readdir(h.workRoot)).toEqual([]);
+  });
+
+  it('merges the site’s newer work into the change and hands back a tree to push from, with no remote', async () => {
+    const h = await harness();
+    await openChange(h, 'hero.html', '<h2>hero</h2>\n');
+    const siteTip = await commitFile(h.remoteGit, h.remoteDir, 'about.html', '<h1>about</h1>\n', 'someone else');
+    await h.mirror.sync();
+
+    const outcome = await h.mirror.bringUpToDate('webagent/c-1', 'main');
+
+    if (outcome.kind !== 'merged') throw new Error(`expected a merge, got ${outcome.kind}`);
+    const tree = simpleGit(outcome.tree.dir);
+    expect((await tree.revparse(['HEAD'])).trim()).toBe(outcome.sha);
+    expect(existsSync(path.join(outcome.tree.dir, 'about.html'))).toBe(true);
+    expect(existsSync(path.join(outcome.tree.dir, 'hero.html'))).toBe(true);
+    // Both histories are parents of the new tip.
+    expect(await tree.raw(['merge-base', '--is-ancestor', siteTip, 'HEAD']).then(() => true, () => false)).toBe(true);
+    expect((await tree.getRemotes()).map((remote) => remote.name)).toEqual([]);
+    await outcome.tree.dispose();
+  });
+
+  it('reports a conflict when the site and the change edited the same lines, and discards the tree', async () => {
+    const h = await harness();
+    await openChange(h, 'index.html', '<h1>the change</h1>\n');
+    await commitFile(h.remoteGit, h.remoteDir, 'index.html', '<h1>someone else</h1>\n', 'someone else');
+    await h.mirror.sync();
+
+    const outcome = await h.mirror.bringUpToDate('webagent/c-1', 'main');
+
+    expect(outcome).toEqual({ kind: 'conflict' });
+    const { readdir } = await import('node:fs/promises');
+    expect(await readdir(h.workRoot)).toEqual([]);
+  });
+
+  it('refuses a branch the mirror does not have rather than inventing one', async () => {
+    const h = await harness();
+    await h.mirror.sync();
+
+    await expect(h.mirror.bringUpToDate('webagent/c-404', 'main')).rejects.toThrow(/c-404/);
+  });
+});

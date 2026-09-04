@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CheckRepoActions, simpleGit, type SimpleGit } from 'simple-git';
-import type { Mirror, WorkingTree } from './types';
+import type { Mirror, UpToDateOutcome, WorkingTree } from './types';
 
 /**
  * R8: the bare mirror is a cache, never a source of truth. Every function
@@ -14,6 +14,8 @@ export interface CreateMirrorOptions {
   remoteUrl: () => Promise<string>;
   cacheDir: string;
   workRoot: string;
+  /** Who a host-made merge commit is by. Defaults to a name that is plainly the product's. */
+  author?: { name: string; email: string };
 }
 
 /**
@@ -122,6 +124,84 @@ async function createWorkingTree(
   };
 }
 
+/**
+ * Merges the site's tip into the change's branch, in a tree of its own.
+ *
+ * The remote-tracking refs are what make this possible, and they are what
+ * `createWorkingTree` deletes — so the merge happens on a clone that still
+ * has them, and the remote is removed afterwards for the same reason it is
+ * removed everywhere else: the tree the caller pushes from must hold no
+ * credential. A conflict is aborted and the tree discarded; the outcome says
+ * so and nothing else changes.
+ */
+async function bringUpToDate(
+  cacheDir: string,
+  workRoot: string,
+  branch: string,
+  baseBranch: string,
+  author: { name: string; email: string },
+): Promise<UpToDateOutcome> {
+  await mkdir(workRoot, { recursive: true });
+  const dir = path.join(workRoot, randomUUID());
+  await simpleGit().clone(cacheDir, dir);
+  const tree = simpleGit(dir);
+  const dispose = () => rm(dir, { recursive: true, force: true });
+
+  try {
+    if (!(await refExists(tree, `refs/remotes/origin/${branch}`))) {
+      throw new Error(`branch "${branch}" was not found in the mirror`);
+    }
+    if (!(await refExists(tree, `refs/remotes/origin/${baseBranch}`))) {
+      throw new Error(`base branch "${baseBranch}" was not found in the mirror`);
+    }
+    await tree.checkout(['-b', branch, `origin/${branch}`]);
+    const before = (await tree.revparse(['HEAD'])).trim();
+
+    await tree.addConfig('user.name', author.name);
+    await tree.addConfig('user.email', author.email);
+    await tree.addConfig('commit.gpgsign', 'false');
+
+    if (!(await mergeCleanly(tree, `origin/${baseBranch}`))) {
+      await tree.raw(['merge', '--abort']).catch(() => undefined);
+      await dispose();
+      return { kind: 'conflict' };
+    }
+
+    const after = (await tree.revparse(['HEAD'])).trim();
+    if (after === before) {
+      await dispose();
+      return { kind: 'current' };
+    }
+
+    await tree.removeRemote('origin');
+    return { kind: 'merged', sha: after, tree: { dir, branch, baseSha: before, dispose } };
+  } catch (err) {
+    await dispose();
+    throw err;
+  }
+}
+
+/**
+ * `git merge`, with a conflict read from the tree rather than from the exit
+ * code: a conflicting merge exits non-zero with everything on stdout, which
+ * simple-git reports as success, so the exit code alone says nothing.
+ * `--no-edit` because nobody is present to edit; `--no-ff` is deliberately
+ * absent so a branch that is simply behind fast-forwards rather than growing
+ * a merge commit that says nothing.
+ */
+async function mergeCleanly(tree: SimpleGit, ref: string): Promise<boolean> {
+  try {
+    await tree.raw(['merge', '--no-edit', ref, '-m', 'bring this change up to date with the site']);
+  } catch {
+    return false;
+  }
+  const status = await tree.status();
+  return status.conflicted.length === 0;
+}
+
+/** The identity host-made commits carry. Mirrors `publishBranch` in the orchestrator. */
+const HOST_AUTHOR = { name: 'Site Editor', email: 'site-editor@webagent.invalid' };
+
 export function createMirror(options: CreateMirrorOptions): Mirror {
   return {
     async sync() {
@@ -143,6 +223,10 @@ export function createMirror(options: CreateMirrorOptions): Mirror {
 
     checkout(branch: string, baseBranch: string) {
       return createWorkingTree(options.cacheDir, options.workRoot, branch, baseBranch);
+    },
+
+    bringUpToDate(branch: string, baseBranch: string) {
+      return bringUpToDate(options.cacheDir, options.workRoot, branch, baseBranch, options.author ?? HOST_AUTHOR);
     },
   };
 }

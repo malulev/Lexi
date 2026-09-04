@@ -13,6 +13,7 @@ export const DEFAULT_POLICY: Policy = {
   maxFilesChanged: 15,
   maxDiffLines: 800,
   forbidNewDependencies: true,
+  forbidExternalCode: true,
 };
 
 /**
@@ -34,7 +35,37 @@ export const UNCONDITIONAL_DENIES: string[] = [
   '**/.opencode/**',
   '**/.env*',
   '.github/**',
+  // Anything the hosting runs, or that tells the hosting what to run. A
+  // Netlify function or edge function is server-side code executed with the
+  // site's identity; `netlify.toml` names the build command; `_redirects` and
+  // `_headers` can send every visitor elsewhere or strip the site's own
+  // security headers. The same for the other hosts' equivalents.
   'netlify.toml',
+  'netlify/**',
+  '.netlify/**',
+  '**/_redirects',
+  '**/_headers',
+  'vercel.json',
+  'api/**',
+  'wrangler.toml',
+  'functions/**',
+  // Build-time configuration is code that runs on the build machine with the
+  // repository's secrets in its environment. A content edit never needs it.
+  '**/*.config.{js,cjs,mjs,ts,mts,cts}',
+  '**/.babelrc*',
+  '**/tsconfig*.json',
+  '**/.npmrc',
+  '**/.yarnrc*',
+  '**/.husky/**',
+  '**/Dockerfile*',
+  '**/docker-compose*',
+  '**/Makefile',
+  '**/*.sh',
+  // Git's own configuration: a submodule points the checkout at another
+  // repository, and attributes can rewrite content on the way in.
+  '.gitmodules',
+  '.gitattributes',
+  '**/.git/**',
   '**/package.json',
   '**/package-lock.json',
   '**/yarn.lock',
@@ -64,6 +95,7 @@ const policySchema = z
     maxFilesChanged: z.number().int().nonnegative().optional(),
     maxDiffLines: z.number().int().nonnegative().optional(),
     forbidNewDependencies: z.boolean().optional(),
+    forbidExternalCode: z.boolean().optional(),
   })
   .strict();
 
@@ -100,6 +132,8 @@ export function parsePolicy(source: string | null): Policy {
     deny: result.data.deny ?? DEFAULT_POLICY.deny,
     maxFilesChanged: result.data.maxFilesChanged ?? DEFAULT_POLICY.maxFilesChanged,
     maxDiffLines: result.data.maxDiffLines ?? DEFAULT_POLICY.maxDiffLines,
-    forbidNewDependencies: result.data.forbidNewDependencies ?? DEFAULT_POLICY.forbidNewDependencies,
+    forbidNewDependencies:
+      result.data.forbidNewDependencies ?? DEFAULT_POLICY.forbidNewDependencies,
+    forbidExternalCode: result.data.forbidExternalCode ?? DEFAULT_POLICY.forbidExternalCode,
   };
 }

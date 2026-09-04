@@ -11,23 +11,49 @@ import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import type { Settings } from '@/types';
 
+// `provider/model`, where the model half may itself contain slashes (e.g.
+// `openrouter/anthropic/claude-sonnet-latest`) — so this checks "at least
+// one non-empty segment, then a slash, then at least one more", not an
+// exact two-part split.
+const MODEL_SHAPE = /^[^\s/]+(\/[^\s/]+)+$/;
+
+const modelSchema = (field: string) =>
+  z.string().regex(MODEL_SHAPE, `${field} must be in \`provider/model\` shape`);
+
+/**
+ * Where attachments land. Relative, inside the repository, and nowhere a
+ * policy could not also see: a leading slash or a `..` segment would let the
+ * upload directory name a path outside the site, which the gate would refuse
+ * anyway but which should be a configuration fault, not a runtime one.
+ */
+const uploadDirSchema = z
+  .string()
+  .regex(/^(?!\/)(?!.*(^|\/)\.\.(\/|$))[^\s]+$/, 'uploadDir must be a relative path inside the repository')
+  .transform((value) => value.replace(/\/+$/, ''));
+
 // Strict, not passthrough: an unknown key — a typo, a leftover, a
 // misplaced setting — must fail loudly rather than be quietly dropped.
 const settingsSchema = z.strictObject({
   alertContact: z.string().email('alertContact must be a valid email address'),
   costCeilingUsd: z.number().positive('costCeilingUsd must be greater than 0'),
-  // `provider/model`, where the model half may itself contain slashes (e.g.
-  // `openrouter/anthropic/claude-sonnet-latest`) — so this checks "at least
-  // one non-empty segment, then a slash, then at least one more", not an
-  // exact two-part split.
-  model: z
-    .string()
-    .regex(/^[^\s/]+(\/[^\s/]+)+$/, 'model must be in `provider/model` shape'),
+  model: modelSchema('model'),
+  // Per-tier overrides. Strict for the same reason the root is: `medum:` is a
+  // typo, not a sixth tier.
+  models: z
+    .strictObject({
+      free: modelSchema('models.free').optional(),
+      low: modelSchema('models.low').optional(),
+      medium: modelSchema('models.medium').optional(),
+      high: modelSchema('models.high').optional(),
+      extra: modelSchema('models.extra').optional(),
+    })
+    .optional(),
   maxRequestMinutes: z
     .number()
     .int('maxRequestMinutes must be a whole number')
     .min(1, 'maxRequestMinutes must be at least 1')
     .max(30, 'maxRequestMinutes must be at most 30'),
+  uploadDir: uploadDirSchema.optional(),
 });
 
 /** Permitted sign-ins belong in deployment configuration (FR-003c1), never in

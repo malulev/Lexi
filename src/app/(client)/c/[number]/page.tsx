@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { ConversationView } from '@/components/ConversationView';
 import { readConversation, selectPublishState } from '@/lib/conversations';
 import { getInstallation } from '@/lib/installation';
+import { defaultTierOf, tierModelMap } from '@/lib/models';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,8 @@ export default async function ConversationPage({
   if (!detail) notFound();
 
   const held = await installation.lock.inspect().catch(() => null);
+  await installation.config.ensureLoaded().catch(() => undefined);
+  const settings = installation.config.current()?.settings;
 
   return (
     <ConversationView
@@ -34,6 +37,8 @@ export default async function ConversationPage({
       messages={detail.messages}
       requestInFlight={Boolean(held)}
       publishState={selectPublishState(detail)}
+      defaultModelTier={defaultTierOf(settings)}
+      models={tierModelMap(settings)}
     />
   );
 }

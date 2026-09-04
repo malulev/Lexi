@@ -4,8 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { RepoClient } from '@/lib/github/types';
+import {
+  discardAttachments,
+  placeAttachments,
+  verifyPlaced,
+  type PlacedAttachment,
+} from '@/lib/jobs/attachments';
 import type { JobBus } from '@/lib/jobs/bus';
 import { CLIENT_MESSAGES, INTERRUPTED_MESSAGE } from '@/lib/jobs/messages';
+import { resolveModel } from '@/lib/models';
 import { toClientProse } from '@/lib/jobs/client-prose';
 import { assemblePrompt } from '@/lib/jobs/prompt';
 import { waitForPreview } from '@/lib/jobs/preview';
@@ -22,10 +29,12 @@ import { writeControlDir } from '@/lib/runner/control';
 import type { JobRunner } from '@/lib/runner/types';
 import type {
   AgentPrompt,
+  Attachment,
   ChangedFile,
   Env,
   ErrorCode,
   Message,
+  ModelTier,
   Outcome,
   RepoConfig,
   RequestRecord,
@@ -79,6 +88,14 @@ export interface RunInput {
   buildFailureDetail?: string;
   /** Paths the gate already refused in this conversation, derived from its records. */
   refusedPaths?: string[];
+  /** How much the client chose to spend. Absent, the repository's own `model` runs. */
+  modelTier?: ModelTier;
+  /**
+   * Files the client attached. Copied into the working tree before the agent
+   * runs, so they pass the same gate and land in the same commit as the change
+   * itself; the temporary copies are removed whatever the ending.
+   */
+  attachments?: Attachment[];
   requestId?: string;
 }
 
@@ -106,12 +123,18 @@ export async function beginRequest(deps: RunDeps, input: RunInput): Promise<Begi
   const acquired = await deps.lock.acquire(requestId, deps.config.settings.maxRequestMinutes);
 
   if (!acquired.ok && acquired.reason === 'held') {
+    // Nothing will run, so nothing will clean up after the attachments either.
+    await discardAttachments(input.attachments);
     return { started: false, errorCode: 'request_in_flight', heldSince: acquired.heldSince };
   }
 
   // A stale lock is broken rather than waited on, and the request it belonged to
   // is given the ending its own process never wrote.
   if (!acquired.ok) await recordAbandoned(deps, input, acquired);
+
+  // Announced before the first stage, so a browser already watching this
+  // conversation follows the request from its very first event.
+  deps.bus.announce({ conversationNumber: input.conversationNumber, requestId, kind: 'change' });
 
   return { started: true, requestId, completed: execute(deps, input, requestId, acquired.handle) };
 }
@@ -146,6 +169,9 @@ async function execute(
 
   let tree: WorkingTree | null = null;
   let controlDir: string | null = null;
+  // Chosen once, here, so the container and the record cannot disagree about
+  // which model a request ran on.
+  const model = resolveModel(deps.config.settings, input.modelTier);
 
   try {
     machine.advance('running');
@@ -153,7 +179,7 @@ async function execute(
     tree = prepared.tree;
     controlDir = prepared.controlDir;
 
-    const agent = await runAgent(deps, requestId, prepared);
+    const agent = await runAgent(deps, requestId, prepared, model);
     if (agent.failure) {
       // The spend is carried into every ending, not just the successful one:
       // a request that failed cost exactly what it cost, and a record omitting
@@ -162,13 +188,14 @@ async function execute(
       return finish(deps, input, machine, {
         requestId,
         startedAt,
+        model,
         ...agent.cost,
         ...agent.failure,
       });
     }
 
     machine.advance('gating');
-    const verdict = await judge(deps, tree, agent.cost);
+    const verdict = await judge(deps, tree, agent.cost, prepared.placed);
     if (verdict.failure) {
       if (verdict.failure.errorCode === 'cost_ceiling') {
         await alertCostCeiling(deps, input, agent.cost.costUsd);
@@ -178,7 +205,7 @@ async function execute(
         deps,
         input,
         machine,
-        { requestId, startedAt, ...agent.cost, ...verdict.failure },
+        { requestId, startedAt, model, ...agent.cost, ...verdict.failure },
         true,
       );
     }
@@ -200,7 +227,7 @@ async function execute(
       deps,
       input,
       machine,
-      settle(preview, { requestId, startedAt, agent, verdict, commit, deps }),
+      settle(preview, { requestId, startedAt, agent, verdict, commit, model }),
     );
   } catch (cause) {
     if (!machine.isTerminal()) machine.advance('failed');
@@ -214,6 +241,7 @@ async function execute(
     });
   } finally {
     await discard(tree, controlDir);
+    await discardAttachments(input.attachments);
     await handle.release();
 
     if (!reachedTerminal) {
@@ -234,6 +262,8 @@ interface Prepared {
   tree: WorkingTree;
   controlDir: string;
   prompt: AgentPrompt;
+  /** Attachments as placed, so the gate can tell them apart from the agent's work. */
+  placed: PlacedAttachment[];
 }
 
 async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promise<Prepared> {
@@ -246,20 +276,33 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
   const root = deps.workRoot ?? tmpdir();
   const controlDir = await mkdtemp(join(root, `webagent-control-${requestId}-`));
 
+  // Attachments go into the tree before the agent sees it, as ordinary files
+  // at ordinary paths. From here on nothing distinguishes them from a file the
+  // agent created: the gate judges them, the commit carries them, and the
+  // prompt names where they landed so the agent can use them.
+  const placed = await placeAttachments(
+    tree.dir,
+    deps.config.settings.uploadDir,
+    input.attachments,
+  );
+  const attachedPaths = placed.map((entry) => entry.path);
+
   const prompt = assemblePrompt({
     request: input.message,
     history: input.history,
     guidance: deps.config.guidance,
+    allowedPaths: deps.config.policy.allow,
     ...(input.targetHint ? { targetHint: input.targetHint } : {}),
     ...(input.buildFailureDetail ? { buildFailureDetail: input.buildFailureDetail } : {}),
     ...(input.refusedPaths?.length ? { refusedPaths: input.refusedPaths } : {}),
+    ...(attachedPaths.length ? { attachedPaths } : {}),
   });
   // Passing the working tree here is not redundant: it is what lets the control
   // writer refuse a control directory nested inside the tree, rather than
   // trusting this caller to have chosen one outside it (FR-015).
   await writeControlDir(controlDir, tree.dir, prompt);
 
-  return { tree, controlDir, prompt };
+  return { tree, controlDir, prompt, placed };
 }
 
 interface Failure {
@@ -277,14 +320,19 @@ interface AgentPass {
   cost: { tokensIn: number; tokensOut: number; costUsd: number };
 }
 
-async function runAgent(deps: RunDeps, requestId: string, prepared: Prepared): Promise<AgentPass> {
+async function runAgent(
+  deps: RunDeps,
+  requestId: string,
+  prepared: Prepared,
+  model: string,
+): Promise<AgentPass> {
   const timeoutMs = deps.config.settings.maxRequestMinutes * 60_000;
   const run = await deps.runner.run({
     requestId,
     workDir: prepared.tree.dir,
     controlDir: prepared.controlDir,
     prompt: prepared.prompt,
-    model: deps.config.settings.model,
+    model,
     timeoutMs,
     onOutput: (text) => deps.bus.publish({ type: 'output', requestId, text }),
   });
@@ -300,7 +348,11 @@ async function runAgent(deps: RunDeps, requestId: string, prepared: Prepared): P
   const summary = result?.summary?.trim() || 'I made the change you asked for.';
 
   if (run.outcome === 'timeout') {
-    return { failure: { outcome: 'failed', errorCode: 'agent_timeout', prose: null }, summary, cost };
+    return {
+      failure: { outcome: 'failed', errorCode: 'agent_timeout', prose: null },
+      summary,
+      cost,
+    };
   }
   if (run.outcome === 'error') {
     return {
@@ -353,6 +405,7 @@ async function judge(
   deps: RunDeps,
   tree: WorkingTree,
   cost: { costUsd: number },
+  placed: PlacedAttachment[] = [],
 ): Promise<Verdict> {
   const changeSet = await deriveChangeSet(tree);
 
@@ -372,7 +425,10 @@ async function judge(
     };
   }
 
-  const result = gate(changeSet.files, deps.config.policy);
+  // Attachments the client sent, still untouched, need not match the allow
+  // list: the list bounds the agent, and these are the client's own files.
+  const attachedPaths = await verifyPlaced(tree.dir, placed);
+  const result = gate(changeSet.files, deps.config.policy, { attachedPaths });
   if (!result.ok) {
     return {
       failure: {
@@ -423,7 +479,7 @@ interface SettleInput {
   agent: AgentPass;
   verdict: Verdict;
   commit: { sha: string };
-  deps: RunDeps;
+  model: string;
 }
 
 function settle(
@@ -436,7 +492,7 @@ function settle(
     commitSha: input.commit.sha,
     filesChanged: input.verdict.files.length,
     diffLines: input.verdict.diffLines,
-    model: input.deps.config.settings.model,
+    model: input.model,
     ...input.agent.cost,
   };
 
@@ -454,7 +510,13 @@ function settle(
   }
 
   if (preview.kind === 'build_failed') {
-    return { ...shared, outcome: 'failed', errorCode: 'build_failed', errorDetail: preview.detail, prose: null };
+    return {
+      ...shared,
+      outcome: 'failed',
+      errorCode: 'build_failed',
+      errorDetail: preview.detail,
+      prose: null,
+    };
   }
 
   return { ...shared, outcome: 'failed', errorCode: 'site_unreachable', prose: null };
@@ -476,18 +538,31 @@ type FinishInput = Failure & {
 async function finish(
   deps: RunDeps,
   input: RunInput,
-  machine: { advance(stage: 'succeeded' | 'failed' | 'blocked'): void; isTerminal(): boolean; stages: StageEvent[] },
+  machine: {
+    advance(stage: 'succeeded' | 'failed' | 'blocked'): void;
+    isTerminal(): boolean;
+    stages: StageEvent[];
+  },
   result: FinishInput,
   alreadyTerminal = false,
 ): Promise<RunOutcome> {
   if (!alreadyTerminal && !machine.isTerminal()) {
-    machine.advance(result.outcome === 'succeeded' ? 'succeeded' : result.outcome === 'blocked' ? 'blocked' : 'failed');
+    machine.advance(
+      result.outcome === 'succeeded'
+        ? 'succeeded'
+        : result.outcome === 'blocked'
+          ? 'blocked'
+          : 'failed',
+    );
   }
 
   const now = deps.now ?? (() => new Date());
   const record = buildRecord(result, machine.stages, now().toISOString());
   const prose = result.prose ?? proseFor(result);
-  const comment = await deps.client.createComment(input.conversationNumber, renderRecord(prose, record));
+  const comment = await deps.client.createComment(
+    input.conversationNumber,
+    renderRecord(prose, record),
+  );
 
   deps.bus.publish({
     type: 'done',
@@ -518,7 +593,10 @@ export const DEFAULT_ERROR_DETAIL: Record<ErrorCode, string> = {
   nothing_to_change: 'the agent exited successfully having modified no file in the working tree',
   nothing_to_publish: 'approval was asked for a conversation with no successful preview to publish',
   nothing_to_undo: 'undo was asked for a conversation that has nothing live to reverse',
-  site_moved_on: 'the default branch has advanced past the published commit, so a revert would take later work with it',
+  site_moved_on:
+    'the default branch has advanced past the published commit, so a revert would take later work with it',
+  site_conflict:
+    'the default branch and the change touch the same lines, so bringing the change up to date needs a person',
   site_unreachable: 'the hosting provider reported no deploy for this branch within the wait',
   request_in_flight: 'another request held the installation lock',
   blocked_by_policy: 'the change touched a path the policy does not permit',

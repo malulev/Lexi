@@ -15,6 +15,7 @@ const DEFAULT_POLICY: Policy = {
   maxFilesChanged: 15,
   maxDiffLines: 800,
   forbidNewDependencies: true,
+  forbidExternalCode: true,
 };
 
 vi.mock('@/lib/policy/parse', () => ({
@@ -60,6 +61,7 @@ function createFakeRepoClient(files: Record<string, string | null>): RepoClient 
     updateComment: notImplemented('updateComment') as () => Promise<CommentInfo>,
     mergePullRequest: notImplemented('mergePullRequest'),
     revertCommit: notImplemented('revertCommit'),
+    compareBranches: notImplemented('compareBranches') as RepoClient['compareBranches'],
     authenticatedRemoteUrl: notImplemented('authenticatedRemoteUrl'),
   };
 }

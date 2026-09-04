@@ -3,7 +3,12 @@ import Link from 'next/link';
 import { NewConversation } from '@/components/NewConversation';
 import { ConversationStatusBadge } from '@/components/MessageList';
 import { listConversations } from '@/lib/conversations';
+import { dictionaryFor, directionOf } from '@/lib/i18n';
+import { readLocale } from '@/lib/i18n/server';
 import { getInstallation } from '@/lib/installation';
+import { defaultTierOf, tierModelMap } from '@/lib/models';
+import { displayHost, readSiteUrl } from '@/lib/site-url';
+import { describeUpdatedAt } from '@/lib/time';
 import type { Conversation } from '@/types';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +19,16 @@ export const dynamic = 'force-dynamic';
  * upstream right now.
  */
 export default async function ConversationListPage() {
-  const { client } = getInstallation();
+  const { client, netlify, config } = getInstallation();
+  const [siteUrl, locale] = await Promise.all([readSiteUrl(netlify), readLocale()]);
+  const t = dictionaryFor(locale);
+  const forward = directionOf(locale) === 'rtl' ? '←' : '→';
+  // Best effort: a settings fault is reported on the configuration page, not
+  // here, and the picker opens on the middle tier meanwhile.
+  await config.ensureLoaded().catch(() => undefined);
+  const settings = config.current()?.settings;
+  const defaultModelTier = defaultTierOf(settings);
+  const models = tierModelMap(settings);
 
   let conversations: Conversation[] = [];
   let unreachable = false;
@@ -26,35 +40,60 @@ export default async function ConversationListPage() {
     unreachable = true;
   }
 
+  const now = Date.now();
+
   return (
-    <main className="conv-list">
-      <h1 className="conv-list__title">What would you like to change?</h1>
+    <main className="home">
+      <section className="home__hero">
+        {siteUrl ? (
+          <p className="home__site">
+            {t.home.editing}{' '}
+            <a href={siteUrl} target="_blank" rel="noopener noreferrer">
+              {displayHost(siteUrl)} <span aria-hidden="true">↗</span>
+            </a>
+          </p>
+        ) : null}
+        <h1 className="home__title">{t.home.title}</h1>
+        <p className="home__lede">{t.home.lede}</p>
+        <div className="home__composer">
+          <NewConversation defaultModelTier={defaultModelTier} models={models} />
+        </div>
+      </section>
 
-      <div className="conv-list__composer">
-        <NewConversation />
-      </div>
+      <section className="home__list" aria-labelledby="changes-heading">
+        <h2 className="home__list-title" id="changes-heading">
+          {t.home.yourChanges}
+        </h2>
 
-      {unreachable ? (
-        <p className="conv-list__status conv-list__status--setback">
-          Can&rsquo;t reach your website&rsquo;s hosting right now. Your changes are safe; try again
-          in a moment.
-        </p>
-      ) : conversations.length === 0 ? (
-        <p className="conv-list__status">
-          Nothing yet. Describe a change above and you will see it here.
-        </p>
-      ) : (
-        <ul className="conv-list__items">
-          {conversations.map((conversation) => (
-            <li className="conv-card" key={conversation.number}>
-              <Link className="conv-card__link" href={`/c/${conversation.number}`}>
-                <span className="conv-card__title">{conversation.title}</span>
-                <ConversationStatusBadge status={conversation.status} />
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+        {unreachable ? (
+          <p className="home__status home__status--setback" role="status">
+            {t.home.unreachable}
+          </p>
+        ) : conversations.length === 0 ? (
+          <p className="home__status">{t.home.nothingYet}</p>
+        ) : (
+          <ul className="conv-cards">
+            {conversations.map((conversation) => (
+              <li className="conv-card" key={conversation.number}>
+                <Link className="conv-card__link" href={`/c/${conversation.number}`}>
+                  <span className="conv-card__body">
+                    <span className="conv-card__title" dir="auto">
+                      {conversation.title}
+                    </span>
+                    <span className="conv-card__meta">
+                      {describeUpdatedAt(conversation.updatedAt, now, locale)}
+                    </span>
+                  </span>
+                  <ConversationStatusBadge status={conversation.status} />
+                  <span className="conv-card__chevron" aria-hidden="true">
+                    {forward}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }

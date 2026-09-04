@@ -352,6 +352,35 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
 }
 
 /**
+ * Ancestry between two branches, from GitHub's compare endpoint. `ahead_by`
+ * counts commits on `head` that `base` lacks; `behind_by` the reverse. The
+ * one endpoint that answers "does this branch already contain the site's
+ * tip?" without walking history commit by commit.
+ */
+async function compareBranches(
+  ctx: Ctx,
+  base: string,
+  head: string,
+): Promise<{ aheadBy: number; behindBy: number }> {
+  const { octokit, owner, repo, repoSlug } = ctx;
+  try {
+    const headers = await ctx.authHeaders();
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+      owner,
+      repo,
+      basehead: `${base}...${head}`,
+      // The commit list is not wanted, only the two counts; the smallest page
+      // keeps the response small on a long-lived branch.
+      per_page: 1,
+      headers,
+    });
+    return { aheadBy: data.ahead_by, behindBy: data.behind_by };
+  } catch (error) {
+    throw describeError(`compare ${base}...${head}`, repoSlug, error);
+  }
+}
+
+/**
  * A credential, not a document. Callers must not log or persist the
  * returned value; it exists to be handed to a local `git push` and nothing
  * else. It never reaches the agent container (FR-015).
@@ -391,6 +420,7 @@ export function createRepoClient(env: Env, deps?: { minter?: TokenMinter; fetch?
     updateComment: (commentId, body) => updateComment(ctx, commentId, body),
     mergePullRequest: (number) => mergePullRequest(ctx, number),
     revertCommit: (sha, branch) => revertCommit(ctx, sha, branch),
+    compareBranches: (base, head) => compareBranches(ctx, base, head),
     authenticatedRemoteUrl: () => authenticatedRemoteUrl(ctx, minter),
   };
 }

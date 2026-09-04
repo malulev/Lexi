@@ -1,74 +1,99 @@
 import { describe, expect, it } from 'vitest';
 
 import { createFakeRepoClient } from '@/lib/github/fake';
-import { isBehind, readChangeFreshness } from '@/lib/github/staleness';
-import type { RefInfo } from '@/lib/github/types';
+import { readChangeFreshness } from '@/lib/github/staleness';
 
 /**
  * FR-030: a change built against a version of the site that has since moved on
- * must be caught before it is published, not after.
+ * must be caught before it is published, not after — and caught by ancestry,
+ * so that touching the change again does not make the site's newer work
+ * disappear from the answer.
  */
 
-function ref(name: string, committedAt: string): RefInfo {
-  return { ref: `refs/heads/${name}`, sha: `sha-of-${name}`, committedAt };
+async function openChange(client: ReturnType<typeof createFakeRepoClient>, branch = 'webagent/c-1') {
+  const base = await client.getRef('refs/heads/main');
+  const sha = await client.createLockCommit('open a conversation', base!.sha);
+  await client.createRef(`refs/heads/${branch}`, sha);
+  return sha;
 }
 
-describe('isBehind', () => {
-  it('is false while the change is the newest thing anyone has written', () => {
-    const site = ref('main', '2026-09-02T10:00:00Z');
-    const change = ref('webagent/c-1', '2026-09-02T10:05:00Z');
-
-    expect(isBehind(site, change)).toBe(false);
-  });
-
-  it('is true once the site itself carries work the change never saw', () => {
-    const site = ref('main', '2026-09-02T11:00:00Z');
-    const change = ref('webagent/c-1', '2026-09-02T10:05:00Z');
-
-    expect(isBehind(site, change)).toBe(true);
-  });
-
-  it('is true when the change has no branch left to publish', () => {
-    expect(isBehind(ref('main', '2026-09-02T10:00:00Z'), null)).toBe(true);
-  });
-
-  it('treats a date it cannot read as the site having moved, never as fresh', () => {
-    // Publishing is the irreversible direction (constitution II), so an
-    // unreadable timestamp resolves against publishing rather than for it.
-    const site = ref('main', 'not a date');
-    const change = ref('webagent/c-1', '2026-09-02T10:05:00Z');
-
-    expect(isBehind(site, change)).toBe(true);
-  });
-});
+/** A developer pushing, or another conversation publishing: main gains a commit the change lacks. */
+async function advanceSite(client: ReturnType<typeof createFakeRepoClient>): Promise<void> {
+  const tip = await client.getRef('refs/heads/main');
+  const sha = await client.createLockCommit("someone else's work", tip!.sha);
+  client.state.refs['refs/heads/main'] = { ref: 'refs/heads/main', sha, committedAt: new Date().toISOString() };
+}
 
 describe('readChangeFreshness', () => {
-  it('reads both refs from the repository rather than being told about them', async () => {
+  it('is current while the change contains everything the site has', async () => {
     const client = createFakeRepoClient({ defaultBranch: 'main' });
-    const base = await client.getRef('refs/heads/main');
-    const sha = await client.createLockCommit('open a conversation', base!.sha);
-    await client.createRef('refs/heads/webagent/c-1', sha);
+    await openChange(client);
 
     await expect(
       readChangeFreshness(client, { branch: 'webagent/c-1', defaultBranch: 'main' }),
-    ).resolves.toEqual({ outOfDate: false });
+    ).resolves.toEqual({ outOfDate: false, behindBy: 0 });
   });
 
-  it('reports a change the site has moved past', async () => {
+  it('is out of date once the site carries work the change never saw', async () => {
     const client = createFakeRepoClient({ defaultBranch: 'main' });
-    const base = await client.getRef('refs/heads/main');
-    const sha = await client.createLockCommit('open a conversation', base!.sha);
-    await client.createRef('refs/heads/webagent/c-1', sha);
+    await openChange(client);
+    await advanceSite(client);
 
-    client.state.refs['refs/heads/main'] = {
-      ref: 'refs/heads/main',
-      sha: 'someone-elses-work',
+    await expect(
+      readChangeFreshness(client, { branch: 'webagent/c-1', defaultBranch: 'main' }),
+    ).resolves.toEqual({ outOfDate: true, behindBy: 1 });
+  });
+
+  it('stays out of date when the change is touched again afterwards — newer is not the same as current', async () => {
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+    const opened = await openChange(client);
+    await advanceSite(client);
+
+    // A follow-up request commits to the change's branch after the site moved.
+    const followUp = await client.createLockCommit('follow-up', opened);
+    client.state.refs['refs/heads/webagent/c-1'] = {
+      ref: 'refs/heads/webagent/c-1',
+      sha: followUp,
       committedAt: new Date(Date.now() + 60_000).toISOString(),
     };
 
     await expect(
       readChangeFreshness(client, { branch: 'webagent/c-1', defaultBranch: 'main' }),
-    ).resolves.toEqual({ outOfDate: true });
+    ).resolves.toEqual({ outOfDate: true, behindBy: 1 });
+  });
+
+  it('is current again once the site’s tip has been brought into the change', async () => {
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+    const opened = await openChange(client);
+    await advanceSite(client);
+    const siteTip = (await client.getRef('refs/heads/main'))!.sha;
+
+    // The merge a publish performs when bringing a change up to date: a commit
+    // with both the change and the site's tip as parents.
+    const mergeSha = 'fake-merge';
+    client.state.commits[mergeSha] = {
+      sha: mergeSha,
+      tree: 't',
+      parents: [opened, siteTip],
+      committedAt: new Date().toISOString(),
+    };
+    client.state.refs['refs/heads/webagent/c-1'] = {
+      ref: 'refs/heads/webagent/c-1',
+      sha: mergeSha,
+      committedAt: new Date().toISOString(),
+    };
+
+    await expect(
+      readChangeFreshness(client, { branch: 'webagent/c-1', defaultBranch: 'main' }),
+    ).resolves.toEqual({ outOfDate: false, behindBy: 0 });
+  });
+
+  it('treats a change with no branch left as out of date, never as current', async () => {
+    const client = createFakeRepoClient({ defaultBranch: 'main' });
+
+    await expect(
+      readChangeFreshness(client, { branch: 'webagent/c-9', defaultBranch: 'main' }),
+    ).resolves.toMatchObject({ outOfDate: true });
   });
 
   it('refuses to guess when the site’s own branch cannot be read', async () => {

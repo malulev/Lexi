@@ -1,5 +1,7 @@
 import { UNCONDITIONAL_DENIES } from '@/lib/policy/parse';
 import { getInstallation } from '@/lib/installation';
+import { DEFAULT_UPLOAD_DIR } from '@/lib/attachments';
+import { MODEL_TIER_LABELS, selectDefaultTier, tierModels } from '@/lib/models';
 import type { RepoConfig } from '@/types';
 
 /**
@@ -102,12 +104,33 @@ export default async function ConfigSettingsPage() {
           <dl className="config-list">
             <Row label="Alert contact" value={config.settings.alertContact} />
             <Row label="Cost ceiling" value={`$${config.settings.costCeilingUsd.toFixed(2)} per request`} />
-            <Row label="Model" value={config.settings.model} />
+            <Row label="Model when no tier is chosen" value={config.settings.model} />
             <Row label="Maximum request duration" value={`${config.settings.maxRequestMinutes} minutes`} />
+            <Row label="Attachments land in" value={config.settings.uploadDir ?? `${DEFAULT_UPLOAD_DIR} (default)`} />
           </dl>
         ) : (
           <p className="config-empty">Nothing has loaded yet.</p>
         )}
+
+        <h3>Model tiers</h3>
+        <p className="config-note">
+          What a client chooses between in the composer, and the model each choice runs. Override a
+          tier with <code>models:</code> in <code>.webagent/config.yml</code>; the picker opens on the
+          tier whose model matches <code>model</code>.
+        </p>
+        {config ? (
+          <dl className="config-list">
+            {tierModels(config.settings).map((row) => (
+              <Row
+                key={row.tier}
+                label={`${MODEL_TIER_LABELS[row.tier].name} (${row.tier})${
+                  selectDefaultTier(config.settings) === row.tier ? ' — default' : ''
+                }`}
+                value={`${row.model}${row.overridden ? ' (overridden)' : ''}`}
+              />
+            ))}
+          </dl>
+        ) : null}
       </section>
 
       <section className="config-section">

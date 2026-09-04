@@ -11,3 +11,6 @@ coverage/
 test-results/
 playwright-report/
 .webagent-state/
+
+# subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/

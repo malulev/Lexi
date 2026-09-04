@@ -36,13 +36,35 @@ export interface Env {
   publicBaseUrl: string;
 }
 
+/**
+ * How much a client chooses to spend on one change, cheapest first
+ * (src/lib/models.ts). A closed vocabulary: the interface offers these five
+ * and nothing else, and a request naming no tier runs `Settings.model`.
+ */
+export type ModelTier = 'free' | 'low' | 'medium' | 'high' | 'extra';
+
 /** Non-secret operational settings from `.webagent/config.yml`. */
 export interface Settings {
   alertContact: string;
   costCeilingUsd: number;
+  /** What runs when a request names no tier. */
   model: string;
+  /** Per-tier overrides of the built-in tier models. Absent tiers keep the default. */
+  models?: Partial<Record<ModelTier, string>>;
   /** 1–30. Doubles as the lock staleness threshold. */
   maxRequestMinutes: number;
+  /** Where a client's attached files land in the site, relative to the repository root. */
+  uploadDir?: string;
+}
+
+/** A file a client attached to a request, held on the host only until the request runs. */
+export interface Attachment {
+  /** The name the client gave it, before sanitising. */
+  name: string;
+  /** Host path of the temporary copy. Removed once the request ends. */
+  tempPath: string;
+  size: number;
+  type: string;
 }
 
 /** Site-declared limits from `.webagent/policy.yml`. All fields defaulted. */
@@ -52,6 +74,8 @@ export interface Policy {
   maxFilesChanged: number;
   maxDiffLines: number;
   forbidNewDependencies: boolean;
+  /** Refuse a change that pulls code or content from another origin into a page. */
+  forbidExternalCode: boolean;
 }
 
 /** What the repository declares, read together because they change together. */
@@ -74,6 +98,10 @@ export interface ChangedFile {
   kind: ChangeKind;
   /** Added plus removed lines for this file. */
   diffLines: number;
+  /** The path is a symbolic link in the working tree, whatever it points at. */
+  symlink?: boolean;
+  /** The lines this change adds, for text files; absent for binaries and deletions. */
+  addedText?: string;
 }
 
 export type PolicyViolation =
@@ -82,7 +110,9 @@ export type PolicyViolation =
   | 'not_allowed_path'
   | 'too_many_files'
   | 'too_many_lines'
-  | 'new_dependency';
+  | 'new_dependency'
+  | 'symlink'
+  | 'external_code';
 
 export type GateResult =
   | { ok: true }
@@ -125,12 +155,29 @@ export type ErrorCode =
   | 'nothing_to_publish'
   | 'nothing_to_undo'
   | 'site_moved_on'
+  | 'site_conflict'
   | 'internal_error';
 
 export interface StageEvent {
   stage: Stage;
   /** ISO 8601, always UTC. */
   at: string;
+}
+
+/**
+ * What a request is for. A change request runs the agent; publishing and
+ * undoing do not, and the interface labels their stages differently
+ * (src/components/ProgressTrail.tsx). The kind is also encoded in the request
+ * id's prefix (src/lib/conversations.ts), which is how a durable record still
+ * says which it was after a restart.
+ */
+export type RequestKind = 'change' | 'publish' | 'undo';
+
+/** Announced on the bus the moment a request begins, before its first stage. */
+export interface RequestAnnouncement {
+  conversationNumber: number;
+  requestId: string;
+  kind: RequestKind;
 }
 
 /** An event on the progress stream. Live output is best effort; stages are not. */
@@ -142,16 +189,14 @@ export type JobEvent =
       requestId: string;
       outcome: Outcome;
       previewUrl?: string;
+      /** The client's own website, once a publish or an undo has reached it. */
+      liveUrl?: string;
       errorCode?: ErrorCode;
     };
 
 /** Notification kinds, listed in the record so sending stays idempotent. */
 export type NotificationEvent =
-  | 'preview_ready'
-  | 'request_blocked'
-  | 'request_failed'
-  | 'published'
-  | 'undone';
+  'preview_ready' | 'request_blocked' | 'request_failed' | 'published' | 'undone';
 
 // ---------------------------------------------------------------------------
 // The durable record — contracts/durable-record.md
@@ -220,6 +265,9 @@ export interface Message {
   outcome?: Outcome;
   errorCode?: ErrorCode;
   previewUrl?: string;
+  /** What the request ran and cost, from its record. Shown only in advanced mode. */
+  model?: string;
+  costUsd?: number;
 }
 
 // ---------------------------------------------------------------------------
