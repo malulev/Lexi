@@ -3,6 +3,11 @@
 How a developer installs one instance for one client site, and how to prove the loop works.
 Implementation detail belongs in `tasks.md`; this is the run-and-verify guide.
 
+> **The repository README is the authoritative install guide.** This file is a specification
+> artefact, kept because `plan.md` and `tasks.md` refer to it. It describes one installation on
+> one machine; deploying several clients to one server, and the operations scripts that do it,
+> live in `README.md` and `ops/README.md`. Where the two disagree, follow the README.
+
 ## Prerequisites
 
 - A client site in a GitHub repository, deploying to Netlify with **Deploy Previews enabled**
@@ -46,6 +51,7 @@ ALLOWED_EMAILS=jane@client.example,marketing@client.example
 CONFIG_PASSWORD_HASH=...      # argon2 hash
 CONFIG_TOTP_SECRET=...
 SMTP_URL=...
+SMTP_FROM=webagent@agency.example
 PUBLIC_BASE_URL=https://edit.client.example
 WEBAGENT_STATE_DIR=/var/lib/webagent   # must be writable; see below
 ```
@@ -93,7 +99,13 @@ times out — the failure looks like a fault in this product rather than a missi
 
 ## Run
 
+The agent image is built separately and deliberately is not a Compose service — it is a
+throwaway container started per request, not a long-running process — so building it is a step
+of its own. Skipping it produces a server that starts cleanly and fails on the first client
+request.
+
 ```bash
+docker build -t webagent/agent:latest agent/
 docker compose up --build
 ```
 

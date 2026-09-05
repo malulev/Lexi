@@ -7,6 +7,21 @@ set -euo pipefail
 # is observable to the host except stdout (streamed as progress) and
 # whatever opencode left behind in /work.
 
+# The other half of the uid problem the host solves from its side.
+#
+# The host widens the working tree so this container's uid can write to it
+# (src/lib/runner/permissions.ts). Everything created *here* is the mirror
+# image of that: a new file or directory the agent adds is owned by this
+# container's uid, and with a default umask the host — a different uid — could
+# then neither commit into a directory the agent made nor delete the tree
+# afterwards. Both failures land after the agent has done its work, so the
+# cost of getting this wrong is a completed change that cannot be published.
+#
+# Nothing here is exposed by it: /work and /control are per-request
+# directories inside an installation's own 0700 state directory, and both are
+# destroyed when the run ends.
+umask 000
+
 PROMPT_FILE="/control/prompt.json"
 RESULT_FILE="/control/result.json"
 WORK_DIR="/work"

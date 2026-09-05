@@ -88,6 +88,11 @@ the password itself is never stored) and `CONFIG_TOTP_SECRET`. It writes to stdo
 else, so append it to the file rather than copying values through a terminal you can scroll
 back through.
 
+Write them with the generator rather than by hand, because **a dotenv file expands `$NAME`
+references and quoting does not stop it**: an argon2 hash pasted in raw arrives gutted —
+`$argon2id$v=19$m=...` becomes `=19=65536,...`. It still looks like a secret, and the only thing
+that notices is startup validation. The generator escapes what it emits.
+
 Add the `CONFIG_TOTP_SECRET` to an authenticator app now, while you have it: it is the second
 factor on the configuration surface, and there is no recovery path if it is lost. Re-run
 `gen:secrets` and redeploy is the recovery path.
@@ -105,11 +110,13 @@ ALLOWED_EMAILS=jane@client.example,marketing@client.example
 One more variable is optional and matters only when several installations share one host:
 
 ```bash
-# How many agent containers may run at once on this host's Docker daemon.
-# Counted across every installation that uses the daemon. A request that
-# arrives while the limit is reached waits its turn (the client sees
-# "Waiting for a free turn"), and gives up after fifteen minutes.
-# Default 2. Rule of thumb: one per 1 GB of RAM left after the app containers.
+# How many agent containers may run at once on the Docker daemon this
+# installation talks to. A request that arrives while the limit is reached
+# waits its turn (the client sees "Waiting for a free turn"), and gives up
+# after fifteen minutes. Default 2, roughly 1 GB of RAM each.
+#
+# Under the multi-client topology below every client has its OWN rootless
+# daemon, so this is a per-client cap and the host total is the sum.
 MAX_CONCURRENT_RUNS=2
 ```
 
@@ -183,58 +190,70 @@ is rejected with a message telling you where sign-ins actually live, and any key
 like a credential is rejected as a committed secret. `.webagent/**` and `AGENTS.md` are on the
 list of paths no site policy can permit the agent to touch, whatever `allow` says.
 
-### Run
-
-```bash
-docker build -t webagent/agent:latest agent/
-docker compose up --build
-```
-
-Read the comment at the top of `docker-compose.yml` before you do. It mounts the Docker socket,
-which is equivalent to root on the host, and it records the hardening path.
-
-Startup validates the configuration and **refuses to serve** on a bad setting, naming it and
-what to check: an unreachable repository, an installation that does not answer, an unreachable
-Netlify site, and a configuration credential no one could ever present. Expect explicit failure
-here rather than a silent start (FR-003b).
-
-### Several sites on one host
-
-One installation serves one website, and nothing here changes that. Several installations
-can share one machine, though: one directory, one `.env`, one Compose project per site, all
-pointed at the same Docker daemon and fronted by a reverse proxy with a hostname each.
-
-The daemon is the shared resource, so it is also the shared limit. Every agent container is
-labelled, and a request counts the running ones before starting its own; while the count is at
-`MAX_CONCURRENT_RUNS` the request waits, and the client sees "Waiting for a free turn". After
-fifteen minutes it gives up with its own sentence and nothing is published. Set the same value
-in every `.env` on the host; the count is host-wide whichever installation makes it.
-
 ---
 
-## Running it for development
+## Running it locally
 
-The application also runs outside Docker, which is the faster loop while working on it:
+Two ways to run it, and the difference is worth knowing. `npm run dev` is the fast loop for
+working on the product. `docker compose up` is what a server runs, and the only way to test the
+Compose wiring itself.
+
+Both need a Docker daemon, including the development server: every request starts a throwaway
+agent container on whatever daemon is local, so the image has to exist before the first request.
 
 ```bash
-export WEBAGENT_STATE_DIR="$PWD/.webagent-state"   # see below
+docker build -t webagent/agent:latest agent/   # once, and again after any change under agent/
+```
+
+### The development server
+
+```bash
+export WEBAGENT_STATE_DIR="$PWD/.webagent-state"   # must be set; see below
+npm run check:env
 npm run dev
 ```
+
+`http://localhost:3000`, with `PUBLIC_BASE_URL=http://localhost:3000` in `.env` so the sign-in
+links point back at the machine you are on. Nothing here needs a public address: the
+orchestrator polls Netlify for the deploy, so the whole request-to-preview loop completes with
+no inbound URL, no tunnel and no webhook.
 
 **`WEBAGENT_STATE_DIR` must be set.** It defaults to `/var/lib/webagent`, which is not writable
 on a development machine, and the failure — the git mirror cannot be created — surfaces in the
 middle of the first request rather than at startup. Point it at a directory you own.
-
-Under Compose the same variable has a second constraint: the path must be **identical inside
-the container and on the host**, which is why `docker-compose.yml` bind-mounts it to itself
-rather than using a named volume. The application asks the host's Docker daemon to mount a
-working tree into the agent container, and that daemon resolves the path on the host.
 
 To skip the email round-trip while testing the loop:
 
 ```bash
 npm run dev:session -- --out /tmp/jar.txt          # a signed cookie for the first ALLOWED_EMAILS address
 curl -b /tmp/jar.txt localhost:3000/api/conversations
+```
+
+Startup validation runs here too, and **refuses to serve** on a bad setting rather than starting
+degraded: an unreachable repository, an installation that does not answer, an unreachable
+Netlify site, a configuration credential no one could ever present (FR-003b). A `dev` that exits
+naming a variable has told you something true.
+
+### The same thing under Compose
+
+```bash
+docker compose up --build
+```
+
+Read the comment at the top of `docker-compose.yml` before you do. It mounts the Docker socket,
+which is equivalent to root on the host, and it records the hardening path.
+
+Under Compose `WEBAGENT_STATE_DIR` has a second constraint: the path must be **identical inside
+the container and on the host**, which is why the file bind-mounts it to itself rather than
+using a named volume. The application asks the host's daemon to mount a working tree into the
+agent container, and that daemon resolves the path on the host, not inside the app container. A
+named volume, or two different paths, produces an agent mounted on an empty directory and a
+request that changes nothing.
+
+### Before you push anything
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run test:int
 ```
 
 ### The helper scripts, in one place
@@ -247,6 +266,101 @@ curl -b /tmp/jar.txt localhost:3000/api/conversations
 | `npm test` | Unit tests: policy gate, record round-trip, state machine, configuration. |
 | `npm run test:int` | Route handlers and startup validation against fakes and recorded fixtures. |
 | `npm run test:e2e` | Request-to-preview and approve-and-undo. |
+
+---
+
+## Deploying on a VPS
+
+One box serves many clients, but **not by sharing anything**. Each client gets its own Linux
+user running its own rootless Docker daemon, its own `/srv/prosel/<slug>` at mode 0700, and its
+own Compose project. That per-user daemon is the whole boundary: the socket this application
+mounts is root on whoever owns it, so a compromise reaches one unprivileged client user rather
+than the host — and the next client's secrets, mirror and history stay unreadable because the
+kernel says so.
+
+A socket proxy is not an alternative. It filters paths, not request bodies, and the runner needs
+`POST /containers/create`, whose body carries the bind mounts.
+
+`ops/` automates all of it; `ops/README.md` is the operator's reference. Sizing: ~1 GB of RAM per
+concurrent agent run plus ~250 MB per idle installation, so 4 GB carries a handful of clients and
+16 GB carries 20–25. For disk, allow ~10 GB per client for the mirror and working trees, plus
+about 1.2 GB of images — each client's rootless daemon keeps its own image store, so the app and
+agent images are paid per client rather than shared. (That is why the app image is a standalone
+multi-stage build: the obvious single-stage one is 2 GB, which is 40 GB across twenty clients.)
+
+### Once per host
+
+```bash
+apt-get update && apt-get install -y git curl caddy
+git clone <this repository> /opt/prosel/src && cd /opt/prosel/src
+ops/bootstrap-host.sh            # Docker, rootless prerequisites, /srv/prosel, local registry
+ufw allow 22,80,443/tcp && ufw --force enable
+```
+
+### Once per client
+
+```bash
+ops/provision-client.sh acme edit.acme.example 3001   # user, rootless daemon, 0700 tree, .env skeleton
+sudoedit /srv/prosel/acme/.env                        # GitHub App, Netlify, OpenRouter, SMTP, ALLOWED_EMAILS
+```
+
+`provision-client.sh` prints the remaining steps verbatim, including how to run `gen:secrets` and
+`check:env` in a throwaway container so the host needs no Node toolchain. Add the printed
+`CONFIG_TOTP_SECRET` to an authenticator before you move on; there is no recovery path for it.
+
+Then publish it:
+
+```bash
+ops/release.sh --client acme     # build once, deliver, start, wait for it to answer
+cat >>/etc/caddy/Caddyfile <<'CADDY'
+edit.acme.example {
+    reverse_proxy 127.0.0.1:3001
+}
+CADDY
+systemctl reload caddy
+ops/status.sh                    # daemon, container, HTTP, running agents, deployed tag
+```
+
+Startup validation refuses to serve on a bad setting rather than starting degraded, naming the
+variable to fix (FR-003b) — so a client that comes up and answers is a client whose repository,
+App installation, hosting site and configuration credential all check out.
+
+### Releasing new code
+
+```bash
+cd /opt/prosel/src && git pull && ops/release.sh
+```
+
+Both images are built **once** on the host's root daemon, tagged with the git short SHA, and
+delivered to each client's daemon; twenty installations do not each run `npm ci && npm run
+build`. Clients roll one at a time, a failure on one is stepped over rather than aborting the
+rest, and the summary reports the image each client is actually running. Restarting mid-request
+is safe: the request is reconstructed from its pull request and its lock is broken as stale
+(FR-009).
+
+### Four things not to get wrong
+
+- **`/srv/prosel/<slug>` and its `state/` stay 0700.** They are the containment. The application
+  makes each per-request working tree writable by the agent container's foreign uid
+  (`src/lib/runner/permissions.ts`), which is safe precisely because nothing outside that
+  installation can traverse the directory holding it.
+- **`MAX_CONCURRENT_RUNS` is per client here, not host-wide.** The application counts agent
+  containers on its own daemon (`src/lib/runner/slots.ts`), and each client now has a different
+  one, so the host total is the sum across installations. Budget it, roughly 1 GB per run.
+- **Set `PORT_HOST`, never `PORT`.** `.env` is both interpolated by Compose and passed into the
+  container, where Next reads `PORT` as its listen port — setting it moves both halves of the
+  mapping and the mapping stops matching. Give each client a distinct `PORT_HOST`, bound to
+  loopback, with the reverse proxy in front.
+- **Never run `docker compose build` in a client directory.** The client holds a compose file,
+  a `.env` and state — no source. Releases build in `/opt/prosel/src`, on the root daemon, via
+  `ops/release.sh`.
+
+### What to back up
+
+Each client's `.env`, and its TOTP secret in an authenticator. That is the whole list. The state
+directory is a cache that rebuilds itself from a fresh clone, and published state, pending
+changes, conversation history and the audit trail live in GitHub and Netlify — there is no
+datastore here to lose.
 
 ---
 
@@ -298,25 +412,41 @@ control never falls open on a broken file (FR-003f).
 
 ---
 
-## Where this differs from `quickstart.md`
+## Running the live end-to-end suite
 
-`specs/001-conversational-site-editing/quickstart.md` was written before the first real
-installation. Where the two disagree, this file is the one that has been run. Corrections:
+`npm run test:e2e` is not part of the normal check loop. Its six tests drive a **real**
+installation against a real repository, a real model and real build minutes: each run opens a
+pull request and spends money. They skip loudly unless you opt in, which is why a green
+`test:e2e` on an unconfigured machine means "skipped six", not "passed six".
 
-- **`WEBAGENT_STATE_DIR` is missing from the quickstart entirely.** It must be set on a
-  development machine; the default is unwritable there, and the failure appears mid-request.
-- **The Netlify outgoing webhook is described as a required step.** It is optional — the
-  orchestrator polls — and it is impossible without a public address, which a first
-  installation usually does not have.
-- **The GitHub App permissions are worth stating exactly**: Contents and Pull requests, read
-  and write, with the webhook unchecked. Nothing more is needed, and the quickstart's "read and
-  write on contents and pull requests" is easy to over-read as a starting point.
-- **The Netlify token is account-wide.** The quickstart does not say so, and the difference
-  matters when the account holds sites other than the client's.
-- **Deploy Previews is listed as a prerequisite but not as a failure mode.** Without it the
-  loop does not error; it waits, indefinitely, which is much harder to diagnose than a failure.
-- **The helper scripts do not appear there**: `check:env`, `gen:secrets`, and `dev:session`
-  were written during the first real installation and are what make it repeatable.
+Point an installation at a throwaway site first, then:
+
+```bash
+npm run dev                                        # terminal one
+npm run dev:session -- --out /tmp/e2e-jar.txt      # terminal two
+WEBAGENT_E2E=1 \
+  WEBAGENT_E2E_COOKIE="$(awk '/webagent_session/ {print $7}' /tmp/e2e-jar.txt)" \
+  WEBAGENT_E2E_LIVE_URL=https://the-throwaway-site.example \
+  npm run test:e2e
+```
+
+`WEBAGENT_E2E_LIVE_URL` is only needed by the approve-and-undo journey, and it is supplied
+rather than derived on purpose: deriving it from the preview URL would assert our own guess back
+at us.
+
+## Auditing a publish afterwards
+
+The conversation is the client's view of what happened. This is the other one, and the point of
+it is that undo is a commit rather than a hosting rollback:
+
+```bash
+gh pr view <number> --json merged,mergedAt
+gh api repos/:owner/:repo/commits?sha=main \
+  --jq '.[0:3][] | .sha[0:8] + "  " + (.commit.message | split("\n")[0])'
+```
+
+Expect the pull request merged, and above the merge commit a revert commit that names it. A
+hosting rollback would leave the repository claiming the change is still live.
 
 Two things remain unverified against a live run and are recorded as such in
 `specs/001-conversational-site-editing/notes/netlify-payload-fields.md`: OpenCode's JSON output

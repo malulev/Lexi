@@ -45,7 +45,6 @@
     "@types/react-dom": "^19.2.5",
     "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.39.5",
-    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "prettier": "^3.9.6",
     "tsx": "^4.23.13",

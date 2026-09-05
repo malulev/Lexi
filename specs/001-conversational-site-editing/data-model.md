@@ -139,6 +139,8 @@ Installation ──0:1── Lock (git reference)
 
 ## What is deliberately not modelled
 
-Users beyond an allow-list of addresses; queued requests, because requests are refused rather
-than queued (FR-007a); per-message cost, because cost is per request; and anything cross-site,
-because no installation knows of another.
+Users beyond an allow-list of addresses; a queue of requests, because a second request for the
+same site is refused rather than queued (FR-007a) — the `queued` stage above is a different
+thing, a single request waiting for a free agent slot on a shared host, and it is held in that
+request's own memory rather than in any queue; per-message cost, because cost is per request;
+and anything cross-site, because no installation knows of another.

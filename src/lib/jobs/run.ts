@@ -26,6 +26,7 @@ import type { Mailer } from '@/lib/notify/email';
 import { gate } from '@/lib/policy/gate';
 import { renderRecord } from '@/lib/record/record';
 import { writeControlDir } from '@/lib/runner/control';
+import { makeAgentWritable } from '@/lib/runner/permissions';
 import type { AgentSlots, SlotOutcome } from '@/lib/runner/slots';
 import type { JobRunner } from '@/lib/runner/types';
 import type {
@@ -336,6 +337,13 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
   // writer refuse a control directory nested inside the tree, rather than
   // trusting this caller to have chosen one outside it (FR-015).
   await writeControlDir(controlDir, tree.dir, prompt);
+
+  // Last, so it covers the attachments and the prompt file as well as the
+  // checkout. The container runs as its own uid and would otherwise find
+  // every one of these read-only — see permissions.ts for why widening them
+  // is contained rather than dangerous.
+  await makeAgentWritable(tree.dir);
+  await makeAgentWritable(controlDir);
 
   return { tree, controlDir, prompt, placed };
 }

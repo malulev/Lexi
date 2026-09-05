@@ -219,7 +219,3 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** Reads a stashed attachment back. Exists for tests and for nothing on the request path. */
-export async function readStashed(attachment: Attachment): Promise<Buffer> {
-  return readFile(attachment.tempPath);
-}

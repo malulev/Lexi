@@ -42,9 +42,27 @@
 #
 # None of these are configured here, because a default that quietly half-works
 # is worse than a default that states plainly what it is.
+#
+# `ops/` takes step 2 for a multi-client host: one Linux user per client, each
+# running its own rootless dockerd, and DOCKER_SOCK below pointed at that
+# user's socket. The socket is still the authority of whoever owns it — that is
+# now one unprivileged client user rather than root, and one client's
+# compromise reaches neither the host nor another client's state directory.
+# Nothing about that is automatic on a plain `docker compose up`; see
+# ops/README.md.
 
 services:
   app:
+    # Two ways in, and which one applies is decided by whether APP_IMAGE names
+    # a tag that already exists. On a development machine nothing sets it, the
+    # tag `prosel/app:local` is not in the daemon, and Compose falls back to
+    # the `build:` block below — one file, one `docker compose up`, no registry.
+    # On a client host `ops/release.sh` sets APP_IMAGE to a tag it has already
+    # built once and pushed to the host registry, so twenty installations pull
+    # the same layers instead of each running `npm ci && npm run build` on a
+    # 2 vCPU box. Keeping both here is what lets the same file serve both.
+    image: ${APP_IMAGE:-prosel/app:local}
+
     # Built inline rather than from a Dockerfile of its own: the whole
     # deployment is meant to be one file to read, and the application image is
     # eight lines of it.
@@ -52,6 +70,19 @@ services:
       context: .
       # Requires Docker Compose v2.17 or newer.
       dockerfile_inline: |
+        # Two stages, for one reason: every client on a shared host runs its
+        # own rootless daemon and therefore its own image store, so the image
+        # size is paid per client rather than once. A single-stage build ships
+        # the toolchain, the dev dependencies and the build cache — about
+        # 2 GB, which is 40 GB across twenty clients. The standalone output is
+        # roughly a tenth of that.
+        FROM node:22-slim AS build
+        WORKDIR /app
+        COPY package.json package-lock.json ./
+        RUN npm ci
+        COPY . .
+        RUN npm run build
+
         FROM node:22-slim
         # git is the application's own tool, not the agent's: the host clones
         # the mirror, checks out the working tree, and makes every commit.
@@ -59,12 +90,18 @@ services:
         RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
             && rm -rf /var/lib/apt/lists/*
         WORKDIR /app
-        COPY package.json package-lock.json ./
-        RUN npm ci
-        COPY . .
-        RUN npm run build
+        ENV NODE_ENV=production
+        # `standalone` carries its own minimal node_modules and server.js; the
+        # static assets are deliberately not part of it and have to be placed
+        # alongside by hand (a Next.js convention, not an oversight). There is
+        # no public/ to copy — this application serves no static files of its
+        # own — so adding one means adding a COPY line here.
+        COPY --from=build /app/.next/standalone ./
+        COPY --from=build /app/.next/static ./.next/static
         EXPOSE 3000
-        CMD ["npm", "run", "start"]
+        # Not `npm run start`: there is no npm project here to run a script
+        # from, only the server the build emitted.
+        CMD ["node", "server.js"]
 
     # Secrets and the one site this install serves. Never baked into the
     # image, and never read from the site's repository (FR-003d).
@@ -84,14 +121,39 @@ services:
       NODE_ENV: production
       # Host-wide cap on agent containers, counted on the daemon above across
       # every installation that shares it. See README, "Several sites on one host".
+      #
+      # "Host-wide" is true only while every installation shares one daemon.
+      # Under the ops/ topology each client has its own rootless daemon, so the
+      # count is per client and the host total is the SUM across clients. The
+      # application cannot see that — it only ever asks its own daemon — so the
+      # budgeting is the operator's: see ops/README.md.
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
 
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Only the HOST half is configurable, and deliberately so. A client host
+      # runs one rootless daemon per Linux user, whose socket lives at
+      # /run/user/<uid>/docker.sock; DOCKER_SOCK points at that one. The
+      # container half stays the standard path, so dockerode inside the app
+      # finds its default and no application code learns which topology it is
+      # running under. Unset — a development machine — it is the root daemon,
+      # with all the authority the warning at the top of this file describes.
+      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
       - ${WEBAGENT_STATE_DIR:-/var/lib/webagent}:${WEBAGENT_STATE_DIR:-/var/lib/webagent}
 
     ports:
-      - '${PORT:-3000}:3000'
+      # Loopback only: the app speaks plain HTTP and does no TLS of its own, so
+      # a root-owned reverse proxy on the host terminates TLS and forwards to
+      # this port. Binding 0.0.0.0 would publish the editing interface on the
+      # public interface unencrypted, and Docker writes its own iptables rules,
+      # so a host firewall does not reliably save you from that.
+      #
+      # PORT_HOST, not PORT, and the distinction is not cosmetic. `.env` above
+      # is both interpolated by Compose AND passed into the container, where
+      # Next reads PORT as the port to listen on — so setting PORT in .env
+      # moves the container's listen port and the mapping's host port together
+      # and the mapping stops matching. Give each installation on a shared host
+      # a distinct PORT_HOST; never put PORT in .env.
+      - '127.0.0.1:${PORT_HOST:-3000}:3000'
 
     # A restart brings the process back with no memory of what was running.
     # That is by design: an interrupted request is reconstructed from the pull

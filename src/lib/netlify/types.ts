@@ -139,4 +139,3 @@ export const rawSiteSchema = z
   })
   .passthrough();
 
-export type RawSite = z.infer<typeof rawSiteSchema>;

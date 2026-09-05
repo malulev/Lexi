@@ -1,0 +1,49 @@
+# The app image is built with `COPY . .` from this directory (see the inline
+# Dockerfile in docker-compose.yml), so anything left in a checkout is baked
+# into every client's image. Two of those matter more than the rest: `.env`,
+# because a build on a configured host would otherwise seal that host's
+# GitHub App key and Netlify token into an image that then gets pushed to a
+# registry and pulled by every other client; and `node_modules`, because the
+# image runs `npm ci` itself and a host's copy is both wrong for the image's
+# platform and the largest thing in the context.
+.git
+.gitignore
+
+node_modules
+.next
+out
+*.tsbuildinfo
+
+# Every spelling, with no exception for `.env.example`: the example is
+# documentation for a human editing a checkout, not something the runtime
+# reads.
+.env
+.env.*
+
+# Test and tool output, none of which the build needs and all of which is
+# stale by the time an image is built.
+test-results
+playwright-report
+coverage
+*.log
+.DS_Store
+
+# Agent-harness and specification directories: read by people and by tools on
+# a development machine, never by the running application.
+.claude
+.specify
+.superpowers
+.webagent-state
+docs
+specs
+
+# Built and run separately, not by this image: the agent container has its own
+# Dockerfile, and the operations scripts run on the host.
+agent
+ops
+
+# Tests do not run in the deployed image, and Playwright's are live-only.
+tests
+playwright.config.ts
+vitest.config.ts
+E2E-SETUP.md

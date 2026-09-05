@@ -28,8 +28,6 @@ import type { RequestKind, Stage } from '@/types';
  * language fills the same shape, and the component reads the page's.
  */
 export const STAGE_LABELS: Record<Stage, string> = en.stages.change;
-export const PUBLISH_STAGE_LABELS: Record<Stage, string> = en.stages.publish;
-export const UNDO_STAGE_LABELS: Record<Stage, string> = en.stages.undo;
 
 export const STAGE_LABELS_BY_KIND: Record<RequestKind, Record<Stage, string>> = en.stages;
 
