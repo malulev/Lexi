@@ -1,176 +1,227 @@
-# Prosel
+# Lexi
 
 *Say what you want changed. See it before it goes live.*
 
-A client describes a change to their website in plain language. An agent makes it on a branch,
-a preview is built, and the client presses one button to publish. No diffs, no branch names, no
-build logs — and nothing reaches the live site without a person approving it.
+A client describes a change to their website in plain language. An agent makes it on a branch, a
+preview is built, and the client presses one button to publish. Nothing reaches the live site
+without a person approving it.
 
-The product's name, tagline and mark live in `src/lib/brand.ts` and `src/components/Brand.tsx`;
-every client surface reads them from there.
-
-**One installation serves one website.** There is no site selector and no tenant column: you
-install this once per client site, the way you would install a self-hosted CMS. Isolation
-between clients is structural, because a second client's data is never present.
+**One installation serves one website.** No site selector, no tenant column — install it once per
+client site, the way you would install a self-hosted CMS. There is no database: published state,
+pending changes, conversation history and the audit trail live in GitHub and Netlify.
 
 ---
 
-## Before you start
+## Who it's for
 
-Get these four things in place first. The one worth double-checking is the first.
+Lexi is installed by someone technical and used by someone who isn't. You keep the repository, the
+policy and the deploy pipeline; the client gets a chat box and a publish button.
 
-### 1. A site on Netlify with Deploy Previews enabled
+- **Freelance developers and agencies** handing off a site to a client who keeps asking for copy
+  and image tweaks. The client stops queueing small changes behind your availability, and you stop
+  billing hours against one-line edits — but every change still arrives as a reviewable pull
+  request on a branch you control.
+- **AI builders and vibe coders** who shipped a site fast and now need someone else to maintain it
+  without touching the codebase or learning git.
+- **Small teams without a CMS.** Marketing edits headlines, prices and images on a static site
+  directly, with a preview before anything is live — no CMS to install, migrate or keep updated.
 
-The client's site must be a GitHub repository linked to a Netlify site, with
-**Site configuration → Build & deploy → Deploy Previews → enabled for pull requests**.
-
-Without it the loop silently waits forever: the agent's change is pushed, the pull request
-opens, and no preview is ever built for it, so nothing is ever ready to approve. Nothing in the
-product reports this as an error, because from its point of view the build simply has not
-finished yet. Verify it before anything else.
-
-### 2. A GitHub App, installed on that one repository
-
-github.com/settings/apps → **New GitHub App**.
-
-- Repository permissions: **Contents — read and write**, **Pull requests — read and write**.
-  Nothing else. The App needs no organisation permissions and no account permissions.
-- **Uncheck Webhook → Active.** This installation does not receive GitHub webhooks.
-- Generate a private key; a `.pem` downloads.
-- Install the App on the client's repository **only**.
-
-You need three values: the **App ID** from the App's settings page, the **private key** file,
-and the **installation ID** — the number at the end of the URL you land on after installing,
-`github.com/settings/installations/<installation id>`. The installation ID is not the App ID,
-and mixing them up is the single most common setup mistake.
-
-### 3. A Netlify personal access token and the site ID
-
-app.netlify.com → User settings → Applications → **New access token**, and the site ID from
-Site configuration → General.
-
-Be clear-eyed about what that token is: **Netlify personal access tokens are account-wide.**
-There is no per-site scoping, so the token this installation holds can reach every site in the
-account it belongs to. If that matters, put the client's site in its own Netlify account or
-team and mint the token there.
-
-### 4. An OpenRouter key, SMTP credentials, and Docker
-
-- An OpenRouter API key, **with a spending limit set on it**. Every request runs a real model.
-- SMTP credentials for the sign-in emails and notifications.
-- Docker, and Docker Compose v2.17 or newer (`docker compose version`).
+The client never sees a diff, a branch name or a build log. What bounds them is
+`.webagent/policy.yml`: the paths the agent may touch, the size of a change it may make, and a
+hard list of things it can never touch whatever that file says.
 
 ---
 
-## Install
+## Requirements
+
+- **A GitHub repository linked to a Netlify site, with Deploy Previews enabled for pull
+  requests** (Site configuration → Build & deploy → Deploy Previews). Without it the loop waits
+  forever — the pull request opens and no preview is ever built, and nothing reports it as an
+  error.
+- **A GitHub App** installed on that one repository. Permissions: *Contents — read and write*,
+  *Pull requests — read and write*, nothing else. Uncheck **Webhook → Active**. Generate a
+  private key. You need the **App ID**, the `.pem`, and the **installation ID** (the number at the
+  end of `github.com/settings/installations/<id>` after installing — not the App ID).
+- **A Netlify personal access token and site ID.** Netlify tokens are account-wide with no
+  per-site scoping, so the token reaches every site in its account. Put the site in its own
+  Netlify team if that matters.
+- **An OpenRouter API key**, with a spending limit set on it.
+- **SMTP credentials** for sign-in emails and notifications.
+- **Docker**, with Compose v2.17 or newer, and **Node 22+**.
+
+---
+
+## Run it locally
 
 ```bash
 git clone <this repository>
 cd website-ai-auto-builder
 npm ci
+docker build -t webagent/agent:latest agent/   # once, and again after any change under agent/
 ```
 
-### Configure
+Every request starts a throwaway agent container on the local Docker daemon, so the agent image
+must exist before the first request — in development too.
 
-Secrets and the identity of the one site go in the environment. Operational settings go in the
-client's repository. Nothing crosses that line: a secret committed to the site's repository is
-rejected rather than honoured (FR-003d), and so is any attempt to grant sign-in access from
-there (FR-003c1).
+### Configure
 
 ```bash
 cp .env.example .env
 npm run gen:secrets -- --password 'a console password you pick' >> .env
 ```
 
-`gen:secrets` mints the four values nobody should choose by hand — `SESSION_SECRET`,
-`NETLIFY_WEBHOOK_SECRET`, `CONFIG_PASSWORD_HASH` (an argon2 hash of the password you passed;
-the password itself is never stored) and `CONFIG_TOTP_SECRET`. It writes to stdout and nothing
-else, so append it to the file rather than copying values through a terminal you can scroll
-back through.
+`gen:secrets` mints `SESSION_SECRET`, `NETLIFY_WEBHOOK_SECRET`, `CONFIG_PASSWORD_HASH` (an argon2
+hash; the password itself is never stored) and `CONFIG_TOTP_SECRET`. Use it rather than writing
+these by hand: **a dotenv file expands `$NAME` references and quoting does not stop it**, so a
+pasted argon2 hash arrives gutted. The generator escapes what it emits.
 
-Write them with the generator rather than by hand, because **a dotenv file expands `$NAME`
-references and quoting does not stop it**: an argon2 hash pasted in raw arrives gutted —
-`$argon2id$v=19$m=...` becomes `=19=65536,...`. It still looks like a secret, and the only thing
-that notices is startup validation. The generator escapes what it emits.
+Add `CONFIG_TOTP_SECRET` to an authenticator app now — it is the second factor on `/settings`,
+and the only recovery path is re-running `gen:secrets`.
 
-Add the `CONFIG_TOTP_SECRET` to an authenticator app now, while you have it: it is the second
-factor on the configuration surface, and there is no recovery path if it is lost. Re-run
-`gen:secrets` and redeploy is the recovery path.
-
-Then fill in the rest by hand — the GitHub App values, the Netlify token and site id, the
-OpenRouter key, `SMTP_URL` and `SMTP_FROM`, `PUBLIC_BASE_URL`, and:
+Fill in the rest by hand: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INSTALLATION_ID`,
+`GITHUB_REPO`, `NETLIFY_TOKEN`, `NETLIFY_SITE_ID`, `OPENROUTER_API_KEY`, `SMTP_URL`, `SMTP_FROM`,
+`PUBLIC_BASE_URL`, and:
 
 ```bash
 # Who may sign in. Deployment configuration, never repository configuration:
-# write access to the client's repository must not confer access to the
-# editing interface (FR-003c1).
+# write access to the client's repository must not confer access to the editor.
 ALLOWED_EMAILS=jane@client.example,marketing@client.example
-```
 
-One more variable is optional and matters only when several installations share one host:
-
-```bash
-# How many agent containers may run at once on the Docker daemon this
-# installation talks to. A request that arrives while the limit is reached
-# waits its turn (the client sees "Waiting for a free turn"), and gives up
-# after fifteen minutes. Default 2, roughly 1 GB of RAM each.
-#
-# Under the multi-client topology below every client has its OWN rootless
-# daemon, so this is a per-client cap and the host total is the sum.
+# Optional. How many agent containers may run at once, ~1 GB of RAM each.
+# A request arriving at the limit waits its turn, then gives up after 15 minutes.
 MAX_CONCURRENT_RUNS=2
 ```
 
-The private key can be pasted with literal `\n` sequences or wrapped in double quotes across
-several lines; both survive. Losing the `-----BEGIN`/`-----END` lines does not.
+The private key can be pasted with literal `\n` or wrapped in double quotes across several lines;
+both survive. Losing the `-----BEGIN`/`-----END` lines does not.
 
 ```bash
-npm run check:env
+npm run check:env   # reports missing, malformed and empty variables. Prints no values.
 ```
 
-`check:env` reads `.env` and `.env.local` the way Next.js does, reports every variable that is
-missing, malformed, or present but empty, warns when a name in `.env.local` is silently
-shadowing one in `.env` — and never prints a value.
+### Start
 
-### Commit the settings to the client's repository
+```bash
+export WEBAGENT_STATE_DIR="$PWD/.webagent-state"   # must be set
+npm run dev
+```
+
+`http://localhost:3000`, with `PUBLIC_BASE_URL=http://localhost:3000` so sign-in links point back
+at this machine. No public address is needed anywhere: the orchestrator polls Netlify, so the
+whole request-to-preview loop completes with no tunnel and no webhook.
+
+**`WEBAGENT_STATE_DIR` must be set.** It defaults to `/var/lib/webagent`, which is not writable on
+a development machine, and the failure surfaces mid-request rather than at startup.
+
+After an `npm ci`, a dependency bump or a branch switch, start with `npm run dev:clean` instead:
+`.next` keys its chunk map to the dependency tree it was built against, and a stale one fails at
+request time with `Cannot find module './vendor-chunks/<something>.js'`. Never share one `.next`
+between `next build` and `next dev`.
+
+Skip the email round-trip while testing:
+
+```bash
+npm run dev:session -- --out /tmp/jar.txt          # a signed cookie for the first ALLOWED_EMAILS address
+curl -b /tmp/jar.txt localhost:3000/api/conversations
+```
+
+Startup validation **refuses to serve** on a bad setting rather than starting degraded — an
+unreachable repository, an installation that does not answer, an unreachable Netlify site. A
+`dev` that exits naming a variable has told you something true.
+
+### Under Compose
+
+```bash
+docker compose up --build
+```
+
+Read the comment at the top of `docker-compose.yml` first: it mounts the Docker socket, which is
+equivalent to root on the host. Here `WEBAGENT_STATE_DIR` has a second constraint — the path must
+be **identical inside the container and on the host** (which is why it is bind-mounted to itself,
+not a named volume). The host's daemon resolves that path on the host, so a named volume or two
+different paths gives you an agent mounted on an empty directory.
+
+### Checks
+
+```bash
+npm run lint && npm run typecheck && npm test && npm run test:int
+```
+
+| Command | What it does |
+|---|---|
+| `npm run check:env` | Reports missing, malformed or empty variables. Prints no values. |
+| `npm run dev:clean` | Discards `.next` and starts the dev server. Use it after any dependency change. |
+| `npm run gen:secrets -- --password '<yours>'` | Mints session secret, webhook secret, argon2 hash, TOTP secret. |
+| `npm run dev:session -- --out <path>` | Writes a curl cookie jar holding a valid session. |
+| `npm test` / `npm run test:int` | Unit tests; route handlers and startup validation against fakes. |
+| `npm run test:e2e` | Live suite — real repository, real model, real build minutes. Skips loudly unless `WEBAGENT_E2E=1`. |
+
+---
+
+## What to add to the client's repository
+
+Three files, and nothing else. No dependency to install, no build step to change, no code in the
+site to modify:
+
+```
+the-client-site/
+├── .webagent/
+│   ├── config.yml     required — the installation refuses to run without it
+│   └── policy.yml     optional — omitting it means `allow: ['**']`, so write one
+└── AGENTS.md          optional — advisory guidance, at the repository root
+```
+
+Everything else the installation needs is outside the repository: the GitHub App installed on it,
+Deploy Previews enabled on the Netlify site, and the secrets in the deployment's `.env`.
+
+Operational settings live in the repository; secrets live in the environment. Nothing crosses that
+line — a secret committed to the site's repository is rejected rather than honoured, and so is any
+attempt to grant sign-in access from there.
+
+### `.webagent/config.yml` — required
 
 ```yaml
-# .webagent/config.yml — operational settings only
-alertContact: dev@agency.example
-costCeilingUsd: 2.00
+alertContact: dev@agency.example              # where configuration faults and run alerts go
+costCeilingUsd: 2.00                          # per request; the run stops rather than exceeds it
 model: openrouter/anthropic/claude-sonnet-5   # runs when a request names no tier
-maxRequestMinutes: 10
-# Optional. Clients choose an effort tier in the composer, not a model; each
-# tier has a built-in model and any of them can be re-pointed here.
+maxRequestMinutes: 10                         # wall clock for one run
+
+# Optional. Clients pick an effort tier in the composer, not a model; each tier
+# has a built-in model, and any of them can be re-pointed here.
 models:
   free: openrouter/cohere/north-mini-code:free
-  # low: openrouter/deepseek/deepseek-v4-flash-0731
-  # medium: openrouter/anthropic/claude-sonnet-5
-  # high: openrouter/anthropic/claude-opus-5
-  # extra: openrouter/anthropic/claude-fable-5.1
-# Optional. Where files a client attaches land in the site. Default public/uploads.
+  low: openrouter/deepseek/deepseek-v4-flash-0731
+  medium: openrouter/anthropic/claude-sonnet-5
+  high: openrouter/anthropic/claude-opus-5
+  extra: openrouter/anthropic/claude-fable-5.1
+
+# Optional. Where files a client attaches land in the site.
 uploadDir: public/uploads
 ```
 
-The composer offers five effort tiers — Free, Basic, Standard, Advanced, Expert — ordered by
-cost. The picker opens on the tier whose model matches `model`, and the configuration page lists
-what each tier runs. Attachments (images and PDF files, up to 10 MB each, 25 MB and five files per
-message) are committed into `uploadDir` with the change they came with, so the policy gates them
-like any other file. "Show details" under the picker (advanced mode) reveals the model each tier
-runs and an estimated cost for a small example task such as replacing a logo, and each finished
-change then shows the model and cost it actually used. The interface speaks English, Hebrew, Dutch
-and French: a switcher in the header remembers the choice in a `webagent.locale` cookie, and the
-agent's own summaries stay in whatever language the agent wrote them.
+| Key | Required | Shape |
+|---|---|---|
+| `alertContact` | yes | a valid email address |
+| `costCeilingUsd` | yes | number greater than 0 |
+| `model` | yes | `provider/model`, e.g. `openrouter/anthropic/claude-sonnet-5` |
+| `maxRequestMinutes` | yes | whole number, 1–30 |
+| `models` | no | any of `free`, `low`, `medium`, `high`, `extra`, each `provider/model` |
+| `uploadDir` | no | relative path inside the repository. Default `public/uploads` |
 
-The policy gate is deliberately strict about what an agent can never touch, whatever the site's
-`allow` list says: its own rules and guidance, anything the hosting runs (`netlify/**`,
-`_redirects`, `_headers`, `api/**`, `functions/**`), build-time configuration, git configuration,
-manifests and lockfiles. Symbolic links are refused outright, and by default a change may not add
-markup that loads or runs code from another origin (`forbidExternalCode: true`). Attached files
-pass the allow list only while they are byte-for-byte what the client sent; an attached SVG with
-scripting in it is refused at upload.
+The file is strict. An unknown key fails loudly rather than being ignored — `medum:` is a typo, not
+a sixth tier. `allowedEmails` is rejected by name, with a message pointing at `ALLOWED_EMAILS` in
+the deployment. So is any key that reads like a credential (`*secret*`, `*token*`, `*password*`,
+`*api_key*`, `*private_key*`, `*credential*`): committing one is a misunderstanding of where
+secrets live, not a typo, and the file is refused rather than honoured.
+
+When this file is invalid the **last valid settings stay in force**, the fault goes to
+`alertContact`, and `/settings` shows it. Access control never falls open on a broken file.
+
+### `.webagent/policy.yml` — what the agent may change
+
+Optional, but a missing file means the defaults, and the default `allow` is `['**']`. Write one.
 
 ```yaml
-# .webagent/policy.yml — what the agent may change
 allow:
   - 'src/components/**'
   - 'src/content/**'
@@ -180,120 +231,102 @@ deny:
 maxFilesChanged: 15
 maxDiffLines: 800
 forbidNewDependencies: true
+forbidExternalCode: true
 ```
 
-Optionally an `AGENTS.md` at the repository root: brand rules, tone, component conventions.
-It is advisory — it never widens what the policy permits, and the agent may not edit it.
+| Key | Default | What it bounds |
+|---|---|---|
+| `allow` | `['**']` | globs the change may touch. Everything else is refused |
+| `deny` | `[]` | globs refused inside `allow`, for carving holes in a broad allow |
+| `maxFilesChanged` | `15` | files in one change set |
+| `maxDiffLines` | `800` | added plus removed lines |
+| `forbidNewDependencies` | `true` | refuses anything under a vendor directory (`node_modules/**`) |
+| `forbidExternalCode` | `true` | refuses *added* markup that loads or runs code from another origin |
 
-Both files are strict. An unknown key fails loudly rather than being ignored, `allowedEmails`
-is rejected with a message telling you where sign-ins actually live, and any key that reads
-like a credential is rejected as a committed secret. `.webagent/**` and `AGENTS.md` are on the
-list of paths no site policy can permit the agent to touch, whatever `allow` says.
+Unknown keys fail loudly here too.
+
+**Whatever `allow` says**, the gate always refuses these — a site's own rules cannot widen what
+governs it:
+
+`.webagent/**` · `**/AGENTS.md` · `**/CLAUDE.md` · `**/.opencode/**` · `**/.env*` · `.github/**` ·
+`netlify.toml` · `netlify/**` · `.netlify/**` · `**/_redirects` · `**/_headers` · `vercel.json` ·
+`api/**` · `functions/**` · `wrangler.toml` · `**/*.config.{js,cjs,mjs,ts,mts,cts}` ·
+`**/tsconfig*.json` · `**/.babelrc*` · `**/.npmrc` · `**/.yarnrc*` · `**/.husky/**` ·
+`**/Dockerfile*` · `**/docker-compose*` · `**/Makefile` · `**/*.sh` · `.gitmodules` ·
+`.gitattributes` · `**/.git/**` · every dependency manifest and lockfile at any depth
+(`package.json`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `bun.lockb`, `Gemfile*`,
+`requirements.txt`, `pyproject.toml`, `poetry.lock`, `go.mod`, `go.sum`, `Cargo.*`, `composer.*`).
+
+A symbolic link in a change set is refused outright, whatever it points at.
+
+**Sizing the allow list is the part people get wrong.** Every file a normal request must touch has
+to be in `allow`, including the ones that are easy to forget:
+
+- `sitemap.xml`, `robots.txt`, `llms.txt` — a new page that is not in the sitemap is a new page
+  Google finds late. None of these are unconditionally denied; they are simply not allowed unless
+  you allow them.
+- the stylesheet, if new sections are meant to extend it.
+- **every page that repeats the header and footer.** On a static site with no templating, adding
+  one page to the navigation edits every other page — seven pages plus the new one plus the sitemap
+  is nine files, which the default `maxFilesChanged: 15` covers and a tightened `5` does not. Count
+  it before you tighten it.
+
+`forbidExternalCode` reads *added* text in files a browser renders as markup (`.html`, `.svg`,
+`.md`, `.jsx`, `.vue`, `.astro`, …) and refuses an off-site `<script src>`, any `<iframe>`,
+`<object>`, `<embed>` or `<portal>`, a `<base>` tag, a `meta refresh`, and `javascript:` URLs.
+Inline scripts and same-origin `src` are left alone. Existing tags are not this change's doing —
+only added ones count, **which includes a new page that copies an existing analytics snippet
+verbatim**. If your pages carry a third-party tag in their `<head>`, either move it behind a
+same-origin loader script or expect every new page to be refused.
+
+### `AGENTS.md` — the site's own instructions
+
+Optional, at the repository root, plain Markdown. It is prepended to every agent prompt as
+advisory guidance. It never widens what the policy permits, and the agent may not edit it —
+`AGENTS.md` and `CLAUDE.md` are denied at any depth, because an agent able to write its own future
+instructions is shaping the next run.
+
+It is the difference between an agent that adds a page and an agent that adds a page the way this
+site adds pages. Cover: the stack and where files live; the site map and URL shape; the components
+and classes that already exist (and the instruction not to invent more); the SEO invariants —
+canonical, title and description limits, one `<h1>`, structured data, sitemap; how images are
+prepared; language and direction; the facts it may state and the facts it must never invent; the
+files it must not touch; and the checks to run before reporting done.
+
+**A worked example is in [`docs/AGENTS.example.md`](docs/AGENTS.example.md)** — a hand-written
+static site on Netlify, with a step-by-step "how to add a new page" covering header, footer,
+`<head>`, JSON-LD, breadcrumbs, sitemap and images.
+
+### What never goes in the repository
+
+Sign-in addresses (`ALLOWED_EMAILS`) and every credential. They are deployment configuration:
+write access to the site's repository must not be able to grant access to the editing interface.
+
+`/settings` shows the configuration in force, behind a password and a TOTP code, and is
+**read-only**. Changing a setting means committing to the client's repository — so an operational
+change is a reviewable, versioned edit with an author, not an unattributed mutation in a web form.
 
 ---
 
-## Running it locally
+## Host it on a VPS
 
-Two ways to run it, and the difference is worth knowing. `npm run dev` is the fast loop for
-working on the product. `docker compose up` is what a server runs, and the only way to test the
-Compose wiring itself.
+One box serves many clients, but **not by sharing anything**. Each client gets its own Linux user
+running its own rootless Docker daemon, its own `/srv/lexi/<slug>` at mode 0700, and its own
+Compose project. That per-user daemon is the whole boundary: the socket the app mounts is root on
+whoever owns it, so a compromise reaches one unprivileged client user rather than the host. (A
+socket proxy is not an alternative — it filters paths, not request bodies, and the runner needs
+`POST /containers/create`, whose body carries the bind mounts.)
 
-Both need a Docker daemon, including the development server: every request starts a throwaway
-agent container on whatever daemon is local, so the image has to exist before the first request.
-
-```bash
-docker build -t webagent/agent:latest agent/   # once, and again after any change under agent/
-```
-
-### The development server
-
-```bash
-export WEBAGENT_STATE_DIR="$PWD/.webagent-state"   # must be set; see below
-npm run check:env
-npm run dev
-```
-
-`http://localhost:3000`, with `PUBLIC_BASE_URL=http://localhost:3000` in `.env` so the sign-in
-links point back at the machine you are on. Nothing here needs a public address: the
-orchestrator polls Netlify for the deploy, so the whole request-to-preview loop completes with
-no inbound URL, no tunnel and no webhook.
-
-**`WEBAGENT_STATE_DIR` must be set.** It defaults to `/var/lib/webagent`, which is not writable
-on a development machine, and the failure — the git mirror cannot be created — surfaces in the
-middle of the first request rather than at startup. Point it at a directory you own.
-
-To skip the email round-trip while testing the loop:
-
-```bash
-npm run dev:session -- --out /tmp/jar.txt          # a signed cookie for the first ALLOWED_EMAILS address
-curl -b /tmp/jar.txt localhost:3000/api/conversations
-```
-
-Startup validation runs here too, and **refuses to serve** on a bad setting rather than starting
-degraded: an unreachable repository, an installation that does not answer, an unreachable
-Netlify site, a configuration credential no one could ever present (FR-003b). A `dev` that exits
-naming a variable has told you something true.
-
-### The same thing under Compose
-
-```bash
-docker compose up --build
-```
-
-Read the comment at the top of `docker-compose.yml` before you do. It mounts the Docker socket,
-which is equivalent to root on the host, and it records the hardening path.
-
-Under Compose `WEBAGENT_STATE_DIR` has a second constraint: the path must be **identical inside
-the container and on the host**, which is why the file bind-mounts it to itself rather than
-using a named volume. The application asks the host's daemon to mount a working tree into the
-agent container, and that daemon resolves the path on the host, not inside the app container. A
-named volume, or two different paths, produces an agent mounted on an empty directory and a
-request that changes nothing.
-
-### Before you push anything
-
-```bash
-npm run lint && npm run typecheck && npm test && npm run test:int
-```
-
-### The helper scripts, in one place
-
-| Command | What it does |
-|---|---|
-| `npm run check:env` | Reports which variables are missing, malformed, or empty. Prints no values. |
-| `npm run gen:secrets -- --password '<yours>'` | Mints the session secret, webhook secret, argon2 password hash, and TOTP secret. |
-| `npm run dev:session -- --out <path>` | Writes a curl cookie jar holding a valid session, bypassing the sign-in email. |
-| `npm test` | Unit tests: policy gate, record round-trip, state machine, configuration. |
-| `npm run test:int` | Route handlers and startup validation against fakes and recorded fixtures. |
-| `npm run test:e2e` | Request-to-preview and approve-and-undo. |
-
----
-
-## Deploying on a VPS
-
-One box serves many clients, but **not by sharing anything**. Each client gets its own Linux
-user running its own rootless Docker daemon, its own `/srv/prosel/<slug>` at mode 0700, and its
-own Compose project. That per-user daemon is the whole boundary: the socket this application
-mounts is root on whoever owns it, so a compromise reaches one unprivileged client user rather
-than the host — and the next client's secrets, mirror and history stay unreadable because the
-kernel says so.
-
-A socket proxy is not an alternative. It filters paths, not request bodies, and the runner needs
-`POST /containers/create`, whose body carries the bind mounts.
-
-`ops/` automates all of it; `ops/README.md` is the operator's reference. Sizing: ~1 GB of RAM per
-concurrent agent run plus ~250 MB per idle installation, so 4 GB carries a handful of clients and
-16 GB carries 20–25. For disk, allow ~10 GB per client for the mirror and working trees, plus
-about 1.2 GB of images — each client's rootless daemon keeps its own image store, so the app and
-agent images are paid per client rather than shared. (That is why the app image is a standalone
-multi-stage build: the obvious single-stage one is 2 GB, which is 40 GB across twenty clients.)
+Sizing: ~1 GB of RAM per concurrent agent run plus ~250 MB per idle installation, so 4 GB carries
+a handful of clients and 16 GB carries 20–25. Allow ~10 GB of disk per client, plus ~1.2 GB of
+images per client — each rootless daemon keeps its own image store.
 
 ### Once per host
 
 ```bash
 apt-get update && apt-get install -y git curl caddy
-git clone <this repository> /opt/prosel/src && cd /opt/prosel/src
-ops/bootstrap-host.sh            # Docker, rootless prerequisites, /srv/prosel, local registry
+git clone <this repository> /opt/lexi/src && cd /opt/lexi/src
+ops/bootstrap-host.sh            # Docker, rootless prerequisites, /srv/lexi, local registry
 ufw allow 22,80,443/tcp && ufw --force enable
 ```
 
@@ -301,14 +334,11 @@ ufw allow 22,80,443/tcp && ufw --force enable
 
 ```bash
 ops/provision-client.sh acme edit.acme.example 3001   # user, rootless daemon, 0700 tree, .env skeleton
-sudoedit /srv/prosel/acme/.env                        # GitHub App, Netlify, OpenRouter, SMTP, ALLOWED_EMAILS
+sudoedit /srv/lexi/acme/.env                          # GitHub App, Netlify, OpenRouter, SMTP, ALLOWED_EMAILS
 ```
 
 `provision-client.sh` prints the remaining steps verbatim, including how to run `gen:secrets` and
-`check:env` in a throwaway container so the host needs no Node toolchain. Add the printed
-`CONFIG_TOTP_SECRET` to an authenticator before you move on; there is no recovery path for it.
-
-Then publish it:
+`check:env` in a throwaway container so the host needs no Node toolchain.
 
 ```bash
 ops/release.sh --client acme     # build once, deliver, start, wait for it to answer
@@ -321,146 +351,58 @@ systemctl reload caddy
 ops/status.sh                    # daemon, container, HTTP, running agents, deployed tag
 ```
 
-Startup validation refuses to serve on a bad setting rather than starting degraded, naming the
-variable to fix (FR-003b) — so a client that comes up and answers is a client whose repository,
-App installation, hosting site and configuration credential all check out.
-
 ### Releasing new code
 
 ```bash
-cd /opt/prosel/src && git pull && ops/release.sh
+cd /opt/lexi/src && git pull && ops/release.sh
 ```
 
 Both images are built **once** on the host's root daemon, tagged with the git short SHA, and
-delivered to each client's daemon; twenty installations do not each run `npm ci && npm run
-build`. Clients roll one at a time, a failure on one is stepped over rather than aborting the
-rest, and the summary reports the image each client is actually running. Restarting mid-request
-is safe: the request is reconstructed from its pull request and its lock is broken as stale
-(FR-009).
+delivered to each client's daemon — twenty installations do not each run `npm ci && npm run build`.
+Clients roll one at a time and a failure on one is stepped over rather than aborting the rest.
+Restarting mid-request is safe: the request is reconstructed from its pull request and its lock is
+broken as stale.
+
+`ops/README.md` is the operator's reference.
 
 ### Four things not to get wrong
 
-- **`/srv/prosel/<slug>` and its `state/` stay 0700.** They are the containment. The application
-  makes each per-request working tree writable by the agent container's foreign uid
-  (`src/lib/runner/permissions.ts`), which is safe precisely because nothing outside that
-  installation can traverse the directory holding it.
-- **`MAX_CONCURRENT_RUNS` is per client here, not host-wide.** The application counts agent
-  containers on its own daemon (`src/lib/runner/slots.ts`), and each client now has a different
-  one, so the host total is the sum across installations. Budget it, roughly 1 GB per run.
+- **`/srv/lexi/<slug>` and its `state/` stay 0700.** They are the containment. Each per-request
+  working tree is made writable by the agent container's foreign uid, which is safe precisely
+  because nothing outside that installation can traverse the directory holding it.
+- **`MAX_CONCURRENT_RUNS` is per client here, not host-wide.** Each client has its own daemon, so
+  the host total is the sum across installations.
 - **Set `PORT_HOST`, never `PORT`.** `.env` is both interpolated by Compose and passed into the
-  container, where Next reads `PORT` as its listen port — setting it moves both halves of the
-  mapping and the mapping stops matching. Give each client a distinct `PORT_HOST`, bound to
-  loopback, with the reverse proxy in front.
-- **Never run `docker compose build` in a client directory.** The client holds a compose file,
-  a `.env` and state — no source. Releases build in `/opt/prosel/src`, on the root daemon, via
-  `ops/release.sh`.
+  container, where Next reads `PORT` as its listen port. Give each client a distinct `PORT_HOST`,
+  bound to loopback, behind the reverse proxy.
+- **Never run `docker compose build` in a client directory.** A client directory holds a compose
+  file, a `.env` and state — no source. Releases build in `/opt/lexi/src` via `ops/release.sh`.
 
 ### What to back up
 
 Each client's `.env`, and its TOTP secret in an authenticator. That is the whole list. The state
-directory is a cache that rebuilds itself from a fresh clone, and published state, pending
-changes, conversation history and the audit trail live in GitHub and Netlify — there is no
-datastore here to lose.
+directory is a cache that rebuilds itself from a fresh clone, and everything else lives in GitHub
+and Netlify.
+
+### The Netlify webhook is optional
+
+Netlify → Site configuration → Notifications → outgoing webhook for **deploy started**,
+**succeeded** and **failed**, pointing at `$PUBLIC_BASE_URL/api/webhooks/netlify`, signed with
+`NETLIFY_WEBHOOK_SECRET`. Set it up if the installation has a public address; skip it if it does
+not. The orchestrator also polls, so the webhook only makes the preview appear a few seconds
+sooner.
 
 ---
 
-## The Netlify outgoing webhook is optional
+## Naming
 
-Netlify → Site configuration → Notifications → outgoing webhook, for **deploy started**,
-**deploy succeeded** and **deploy failed**, pointing at
-`$PUBLIC_BASE_URL/api/webhooks/netlify`, signed with the `NETLIFY_WEBHOOK_SECRET` from
-`gen:secrets`.
-
-Set it up if this installation has a public address. **Skip it if it does not.** The
-orchestrator also polls Netlify for the deploy, so the whole loop completes with no inbound URL
-at all — no tunnel, no ngrok, nothing to expose. The webhook only makes the preview appear a
-few seconds sooner.
-
----
-
-## Configuration surface
-
-`/settings`, behind a password and a time-based code — a credential distinct from and stronger
-than a client sign-in, because it is the credential that could point this installation at a
-different website (FR-003a). It shows the deployment configuration in force, the settings and
-policy read from the site's repository, and any fault in them.
-
-It is **read-only**. Changing a setting means committing to the client's repository, which is
-the point: an operational change is then a reviewable, versioned edit with an author, not an
-unattributed mutation in a web form. When the settings file is invalid, the last valid settings
-stay in force, the fault is reported to the alert contact, and this page shows it — access
-control never falls open on a broken file (FR-003f).
-
----
-
-## Proving it works
-
-1. **Sign-in is restricted.** `POST /api/auth/request` with an address not in `ALLOWED_EMAILS`
-   returns `202` and sends no email. The response never reveals which addresses are permitted.
-2. **Request to preview.** Sign in, ask for "change the homepage headline to *Built for
-   speed*". Expect an acknowledgement in seconds, a visible stage change inside a minute, and a
-   preview link within about four — with the live site unchanged.
-3. **The gate holds.** Ask the agent to edit `.webagent/policy.yml`. It is refused whatever the
-   policy says, and nothing is committed anywhere — there is no branch to discard, because no
-   commit was ever made.
-4. **One request at a time.** A second message while one is running is refused by the server
-   with `409`, not merely greyed out in the browser.
-5. **History survives a restart.** Restart mid-request and reopen the conversation: it is
-   rebuilt from the pull request's comments, because that is the only place it ever lived.
-6. **Publish and undo.** Approve, see it live; press Undo, see the revert in the repository —
-   not just a rolled-back deploy.
-
----
-
-## Running the live end-to-end suite
-
-`npm run test:e2e` is not part of the normal check loop. Its six tests drive a **real**
-installation against a real repository, a real model and real build minutes: each run opens a
-pull request and spends money. They skip loudly unless you opt in, which is why a green
-`test:e2e` on an unconfigured machine means "skipped six", not "passed six".
-
-Point an installation at a throwaway site first, then:
-
-```bash
-npm run dev                                        # terminal one
-npm run dev:session -- --out /tmp/e2e-jar.txt      # terminal two
-WEBAGENT_E2E=1 \
-  WEBAGENT_E2E_COOKIE="$(awk '/webagent_session/ {print $7}' /tmp/e2e-jar.txt)" \
-  WEBAGENT_E2E_LIVE_URL=https://the-throwaway-site.example \
-  npm run test:e2e
-```
-
-`WEBAGENT_E2E_LIVE_URL` is only needed by the approve-and-undo journey, and it is supplied
-rather than derived on purpose: deriving it from the preview URL would assert our own guess back
-at us.
-
-## Auditing a publish afterwards
-
-The conversation is the client's view of what happened. This is the other one, and the point of
-it is that undo is a commit rather than a hosting rollback:
-
-```bash
-gh pr view <number> --json merged,mergedAt
-gh api repos/:owner/:repo/commits?sha=main \
-  --jq '.[0:3][] | .sha[0:8] + "  " + (.commit.message | split("\n")[0])'
-```
-
-Expect the pull request merged, and above the merge commit a revert commit that names it. A
-hosting rollback would leave the repository claiming the change is still live.
-
-Two things remain unverified against a live run and are recorded as such in
-`specs/001-conversational-site-editing/notes/netlify-payload-fields.md`: OpenCode's JSON output
-field names for token and cost accounting, and Netlify's deploy field names used to correlate a
-deploy back to a conversation.
-
----
+The product's name, tagline and mark live in `src/lib/brand.ts` and `src/components/Brand.tsx`;
+every client surface reads them from there, so renaming is a one-file change.
 
 ## What it will not do
 
 Deferred by explicit decision, not oversight: visual element picking, self-serve onboarding,
-multi-model routing, billing, and any application database. Published state, pending changes,
-conversation history and the audit trail live in GitHub and Netlify, which are the system of
-record. Nothing is mirrored into a datastore, because there is no datastore.
+multi-model routing, billing, and any application database.
 
 See `.specify/memory/constitution.md` for the principles this is held to, and
-`specs/001-conversational-site-editing/` for the specification, the plan, and the contracts.
+`specs/001-conversational-site-editing/` for the specification, plan and contracts.
