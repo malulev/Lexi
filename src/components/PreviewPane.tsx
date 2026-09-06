@@ -53,6 +53,13 @@ interface PreviewPaneProps {
   lastFailureMessage?: string;
   /** The client's own website, once a publish has reached it. */
   liveUrl?: string;
+  /**
+   * The framed page is the live website, not a private preview — true for an
+   * undone conversation, whose branch preview would otherwise still show the
+   * change the client just took back. It suppresses the "Private" tag, since
+   * a public live site is not private.
+   */
+  liveMode?: boolean;
   /** What is being built right now, when it is not a preview. */
   updatingLabel?: string;
   /** The running request, so the empty pane can keep the client company. */
@@ -76,6 +83,7 @@ export function PreviewPane({
   requestInFlight,
   lastFailureMessage,
   liveUrl,
+  liveMode = false,
   updatingLabel,
   working,
   version = '',
@@ -90,7 +98,7 @@ export function PreviewPane({
       <header className="preview-pane__toolbar">
         <div className="preview-pane__lead">
           <span className="preview-pane__title">{t.preview.title}</span>
-          {state.kind === 'ready' ? (
+          {state.kind === 'ready' && !liveMode ? (
             <span
               className={`preview-pane__state${state.updating ? ' preview-pane__state--busy' : ''}`}
             >

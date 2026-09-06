@@ -4,6 +4,7 @@ import { ConversationView } from '@/components/ConversationView';
 import { readConversation, selectPublishState } from '@/lib/conversations';
 import { getInstallation } from '@/lib/installation';
 import { defaultTierOf, tierModelMap } from '@/lib/models';
+import { readSiteUrl } from '@/lib/site-url';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,10 @@ export default async function ConversationPage({
   const held = await installation.lock.inspect().catch(() => null);
   await installation.config.ensureLoaded().catch(() => undefined);
   const settings = installation.config.current()?.settings;
+  // Only needed once a conversation is undone, but read here so the view has it
+  // on first paint rather than after a round trip. A failed read costs the
+  // reverted-site frame, nothing else.
+  const liveSiteUrl = await readSiteUrl(installation.netlify);
 
   return (
     <ConversationView
@@ -39,6 +44,7 @@ export default async function ConversationPage({
       publishState={selectPublishState(detail)}
       defaultModelTier={defaultTierOf(settings)}
       models={tierModelMap(settings)}
+      {...(liveSiteUrl ? { liveSiteUrl } : {})}
     />
   );
 }

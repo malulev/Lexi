@@ -31,6 +31,36 @@ import type { Conversation, Message, ModelTier } from '@/types';
  * The preview has the room: it is the thing the client came to look at. The
  * conversation sits beside it, and on a phone the two take turns.
  */
+/**
+ * Which address the preview pane should actually frame.
+ *
+ * A conversation's preview is the deploy preview of its own branch, and that
+ * branch keeps the change on it forever — undo reverses the change on the live
+ * site (the default branch), never on this branch. So once a conversation is
+ * undone, framing its branch preview would show the client the very change
+ * they just took back, while their real website no longer has it. In that one
+ * state the pane frames the live website instead, which is now the reverted
+ * truth. Every other state frames the branch preview as before.
+ */
+export interface EffectivePreview {
+  url?: string;
+  /** True when the framed page is the live website, not a private preview. */
+  live: boolean;
+}
+
+export function selectEffectivePreview(input: {
+  publishState: PublishState;
+  streamPreviewUrl?: string;
+  conversationPreviewUrl?: string;
+  liveSiteUrl?: string;
+}): EffectivePreview {
+  if (input.publishState === 'undone') {
+    return { ...(input.liveSiteUrl ? { url: input.liveSiteUrl } : {}), live: true };
+  }
+  const url = input.streamPreviewUrl ?? input.conversationPreviewUrl;
+  return { ...(url ? { url } : {}), live: false };
+}
+
 export function ConversationView({
   conversation,
   messages,
@@ -38,6 +68,7 @@ export function ConversationView({
   publishState,
   defaultModelTier,
   models,
+  liveSiteUrl,
 }: {
   conversation: Conversation;
   messages: Message[];
@@ -48,6 +79,8 @@ export function ConversationView({
   defaultModelTier?: ModelTier;
   /** The model each tier runs here, for the picker's details view. */
   models?: Record<ModelTier, string>;
+  /** The client's own website address, so an undone conversation can show it reverted. */
+  liveSiteUrl?: string;
 }) {
   const router = useRouter();
   const { t } = useTranslation();
@@ -76,12 +109,19 @@ export function ConversationView({
   const startedAt = stream.startedAt ?? pendingSince;
   const publication = kind !== 'change';
   const lastFailure = lastFailureMessageOf(messages, stream.errorCode, t);
-  const previewUrl = stream.previewUrl ?? conversation.previewUrl;
-  // The newest attempt that produced a preview, durable or live: the frame
-  // reloads when this changes and not otherwise.
+  const preview = selectEffectivePreview({
+    publishState,
+    ...(stream.previewUrl ? { streamPreviewUrl: stream.previewUrl } : {}),
+    ...(conversation.previewUrl ? { conversationPreviewUrl: conversation.previewUrl } : {}),
+    ...(liveSiteUrl ? { liveSiteUrl } : {}),
+  });
+  const previewUrl = preview.url;
+  // The newest attempt that produced a preview, durable or live, plus whether
+  // the pane is now framing the reverted live site: the frame reloads when any
+  // of these changes and not otherwise.
   const previewVersion = `${messages.filter((message) => message.previewUrl).at(-1)?.id ?? 0}:${
     stream.outcome === 'succeeded' ? (stream.request?.requestId ?? '') : ''
-  }`;
+  }:${preview.live ? 'live' : ''}`;
   const busyNote = publication ? t.publicationInProgress : t.errors.request_in_flight;
 
   // A request that has just ended leaves the page showing an ephemeral trail.
@@ -143,10 +183,11 @@ export function ConversationView({
 
       <section className="conv__preview">
         <PreviewPane
-          previewUrl={previewUrl}
+          {...(previewUrl ? { previewUrl } : {})}
           requestInFlight={running && !publication}
-          {...(lastFailure ? { lastFailureMessage: lastFailure } : {})}
-          {...(stream.liveUrl ? { liveUrl: stream.liveUrl } : {})}
+          liveMode={preview.live}
+          {...(lastFailure && !preview.live ? { lastFailureMessage: lastFailure } : {})}
+          {...(stream.liveUrl && !preview.live ? { liveUrl: stream.liveUrl } : {})}
           {...(updatingLabel ? { updatingLabel } : {})}
           version={previewVersion}
           working={
