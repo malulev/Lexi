@@ -11,7 +11,7 @@ set -euo pipefail
 #     installed HERE because they are host-wide apt state: installing them
 #     twenty times, once per client, would be twenty identical no-ops with
 #     twenty chances to fail halfway.
-#   - /srv/prosel, the parent of every client's directory. Mode 0755 and
+#   - /srv/lexi, the parent of every client's directory. Mode 0755 and
 #     root-owned on purpose: each client subdirectory underneath is 0700 and
 #     owned by that client, so the parent only needs to be traversable.
 #   - A registry on 127.0.0.1:5000. Twenty clients must not each run
@@ -27,7 +27,7 @@ usage() {
   cat <<'USAGE'
 Usage: ops/bootstrap-host.sh [--registry-port <port>]
 
-Prepares a fresh VPS to host Prosel client installations. Run as root, once.
+Prepares a fresh VPS to host Lexi client installations. Run as root, once.
 Idempotent: re-running repairs a partial run and changes nothing else.
 
 Options:
@@ -40,9 +40,9 @@ USAGE
 }
 
 REGISTRY_PORT=5000
-REGISTRY_NAME=prosel-registry
-REGISTRY_VOLUME=prosel-registry-data
-CLIENT_ROOT=/srv/prosel
+REGISTRY_NAME=lexi-registry
+REGISTRY_VOLUME=lexi-registry-data
+CLIENT_ROOT=/srv/lexi
 
 # Compose v2.17 is the floor because docker-compose.yml builds the app image
 # from `dockerfile_inline`, which does not exist before it. An older Compose

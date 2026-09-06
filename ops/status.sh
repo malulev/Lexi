@@ -23,7 +23,7 @@ usage() {
   cat <<'USAGE'
 Usage: ops/status.sh [<slug>] [--logs] [--tail <lines>]
 
-Reports, for every client installation under /srv/prosel (or just <slug>):
+Reports, for every client installation under /srv/lexi (or just <slug>):
 whether its rootless daemon is up, whether its app container is running,
 whether its loopback port answers HTTP, how many agent containers are running
 on its daemon, and which image tag is deployed. Ends with the host-wide agent
@@ -42,7 +42,7 @@ Options:
 USAGE
 }
 
-CLIENT_ROOT=/srv/prosel
+CLIENT_ROOT=/srv/lexi
 ONLY_CLIENT=""
 SHOW_LOGS=0
 TAIL_LINES=50
@@ -98,7 +98,7 @@ parse_args() {
 
 require_root() {
   # Not vanity: reading each client's daemon means becoming each client, and
-  # /srv/prosel/<slug> is 0700 for exactly the reason that nobody else can.
+  # /srv/lexi/<slug> is 0700 for exactly the reason that nobody else can.
   [ "$(id -u)" -eq 0 ] || die "must run as root (it reads every client's 0700 directory and daemon). Try: sudo $0"
 }
 

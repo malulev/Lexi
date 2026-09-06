@@ -55,13 +55,13 @@ services:
   app:
     # Two ways in, and which one applies is decided by whether APP_IMAGE names
     # a tag that already exists. On a development machine nothing sets it, the
-    # tag `prosel/app:local` is not in the daemon, and Compose falls back to
+    # tag `lexi/app:local` is not in the daemon, and Compose falls back to
     # the `build:` block below — one file, one `docker compose up`, no registry.
     # On a client host `ops/release.sh` sets APP_IMAGE to a tag it has already
     # built once and pushed to the host registry, so twenty installations pull
     # the same layers instead of each running `npm ci && npm run build` on a
     # 2 vCPU box. Keeping both here is what lets the same file serve both.
-    image: ${APP_IMAGE:-prosel/app:local}
+    image: ${APP_IMAGE:-lexi/app:local}
 
     # Built inline rather than from a Dockerfile of its own: the whole
     # deployment is meant to be one file to read, and the application image is

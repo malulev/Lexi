@@ -15,7 +15,7 @@ set -euo pipefail
 #   compromise buys user A's authority: A's own .env, A's own state, and
 #   nothing of B's — B's directory is 0700 and owned by B.
 #
-#   /srv/prosel/<slug>/            0700 <slug>:<slug>
+#   /srv/lexi/<slug>/            0700 <slug>:<slug>
 #     .env                         0600 <slug>:<slug>   secrets, filled by hand
 #     docker-compose.yml           0600 <slug>:<slug>   copied from the repo
 #     state/                       0700 <slug>:<slug>   WEBAGENT_STATE_DIR
@@ -38,7 +38,7 @@ usage() {
 Usage: ops/provision-client.sh <slug> <hostname> <port> [--force] [--registry-port <port>]
 
 Creates one client installation: a Linux user with its own rootless Docker
-daemon, /srv/prosel/<slug>/ at mode 0700, and a .env skeleton. Run as root.
+daemon, /srv/lexi/<slug>/ at mode 0700, and a .env skeleton. Run as root.
 
 Arguments:
   <slug>      Client identifier. Becomes the Linux user name and the directory
@@ -62,7 +62,7 @@ Example:
 USAGE
 }
 
-CLIENT_ROOT=/srv/prosel
+CLIENT_ROOT=/srv/lexi
 REGISTRY_PORT=5000
 FORCE=0
 SLUG=""
@@ -329,7 +329,7 @@ DOCKER_SOCK=/run/user/${uid}/docker.sock
 PORT_HOST=${PORT}
 
 # Set by ops/release.sh on every roll-forward. Leave them alone by hand.
-APP_IMAGE=127.0.0.1:${REGISTRY_PORT}/prosel/app:bootstrap
+APP_IMAGE=127.0.0.1:${REGISTRY_PORT}/lexi/app:bootstrap
 AGENT_IMAGE=127.0.0.1:${REGISTRY_PORT}/webagent/agent:bootstrap
 
 # Agent containers allowed at once ON THIS CLIENT'S DAEMON. Each client has its

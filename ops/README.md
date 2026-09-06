@@ -10,7 +10,7 @@ execution is root on the box and every other client's secrets. Point client A at
 by user A and the same compromise buys user A: A's `.env`, A's state, and nothing of B's.
 
 ```
-/srv/prosel/<slug>/          0700 <slug>:<slug>
+/srv/lexi/<slug>/          0700 <slug>:<slug>
   .env                       0600 <slug>:<slug>    secrets, hand-filled
   docker-compose.yml         0600 <slug>:<slug>    copied from the repository
   state/                     0700 <slug>:<slug>    WEBAGENT_STATE_DIR
@@ -29,7 +29,7 @@ loopback-only port.
 
 | Script | Run as | When |
 |---|---|---|
-| `bootstrap-host.sh` | root | Once per VPS. Docker, the rootless prerequisites, `/srv/prosel`, the registry, a Compose ≥ 2.17 check. |
+| `bootstrap-host.sh` | root | Once per VPS. Docker, the rootless prerequisites, `/srv/lexi`, the registry, a Compose ≥ 2.17 check. |
 | `provision-client.sh <slug> <hostname> <port>` | root | Once per client. The user, its rootless daemon, the 0700 tree, a `.env` skeleton. Starts nothing. |
 | `release.sh [git-ref]` | root | Every deploy. Builds and pushes both images, then rolls each client forward one at a time. `--client <slug>` for one. |
 | `status.sh [<slug>]` | root | Any time. One line per client, plus the host-wide agent total. `--logs` to see why one is unhappy. |
@@ -47,8 +47,8 @@ Order: `bootstrap-host.sh` → `provision-client.sh` → fill in `.env` by hand 
 ```bash
 # --- once per host, as root -------------------------------------------------
 apt-get update && apt-get install -y git curl
-mkdir -p /opt/prosel && git clone <this repository> /opt/prosel/src
-cd /opt/prosel/src
+mkdir -p /opt/lexi && git clone <this repository> /opt/lexi/src
+cd /opt/lexi/src
 ops/bootstrap-host.sh
 
 apt-get install -y caddy          # or your proxy of choice
@@ -57,22 +57,22 @@ apt-get install -y caddy          # or your proxy of choice
 ops/provision-client.sh acme edit.acme.example 3001
 
 # Fill in the GitHub App, Netlify, OpenRouter, SMTP and ALLOWED_EMAILS values:
-sudoedit /srv/prosel/acme/.env
+sudoedit /srv/lexi/acme/.env
 
 # Mint the four secrets and append them AS the client user, so the file stays
 # 0600 and no value is ever echoed to your terminal. The toolchain runs in a
 # throwaway copy of the checkout so the host needs no Node installed, and so
-# that /opt/prosel/src stays a clean build source.
-docker run --rm -v /opt/prosel/src:/src:ro -w /build node:22-slim \
+# that /opt/lexi/src stays a clean build source.
+docker run --rm -v /opt/lexi/src:/src:ro -w /build node:22-slim \
   sh -c 'cp -a /src/. /build && npm ci --silent \
          && npm run --silent gen:secrets -- --password "a console password you pick"' \
-  | sudo -u acme tee -a /srv/prosel/acme/.env >/dev/null
+  | sudo -u acme tee -a /srv/lexi/acme/.env >/dev/null
 # Add CONFIG_TOTP_SECRET to an authenticator app now — read it once with
-# `sudo -u acme grep CONFIG_TOTP_SECRET /srv/prosel/acme/.env`. There is no
+# `sudo -u acme grep CONFIG_TOTP_SECRET /srv/lexi/acme/.env`. There is no
 # recovery path; re-running gen:secrets is the recovery path.
 
 # Confirm it parses. It prints variable names and never values:
-docker run --rm -v /opt/prosel/src:/src:ro -v /srv/prosel/acme/.env:/secret/.env:ro \
+docker run --rm -v /opt/lexi/src:/src:ro -v /srv/lexi/acme/.env:/secret/.env:ro \
   -w /build node:22-slim \
   sh -c 'cp -a /src/. /build && cp /secret/.env /build/.env \
          && npm ci --silent && npm run --silent check:env'
@@ -103,7 +103,7 @@ new code to all of them afterwards is one command: `ops/release.sh`.
 request. The application makes each of those working trees **world-writable**, because the agent
 container runs as a mapped subordinate UID that is nobody the host has heard of. That is
 deliberate and it is not the hole — the hole would be a parent directory anyone can traverse.
-The `0700` on `/srv/prosel/<slug>/` and on `state/` is the containment. Never relax it "so the
+The `0700` on `/srv/lexi/<slug>/` and on `state/` is the containment. Never relax it "so the
 agent can write": the agent reaches its tree through a bind mount, which the daemon resolves
 once, as `<slug>`, so the container process never traverses the parent at all.
 
