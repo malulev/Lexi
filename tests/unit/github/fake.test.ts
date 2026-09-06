@@ -186,6 +186,28 @@ describe('createFakeRepoClient', () => {
     expect(tip?.sha).toBe(reverted.sha);
   });
 
+  it('refuses to revert a merge once the branch has moved on, leaving the tip untouched', async () => {
+    const client = createFakeRepoClient();
+    const pr = await client.createPullRequest({
+      title: 'A',
+      head: 'webagent/c-1',
+      base: 'main',
+      body: '',
+    });
+    const merged = await client.mergePullRequest(pr.number);
+    const branch = await client.getDefaultBranch();
+
+    // A later commit lands on the default branch after the merge, so the merge
+    // is no longer the tip. A wholesale revert would discard it.
+    const laterSha = await client.createLockCommit('a later change', merged.sha);
+    await client.deleteRef(`refs/heads/${branch}`);
+    await client.createRef(`refs/heads/${branch}`, laterSha);
+
+    await expect(client.revertCommit(merged.sha, branch)).rejects.toThrow(/advanced/i);
+    const tip = await client.getRef(`refs/heads/${branch}`);
+    expect(tip?.sha).toBe(laterSha);
+  });
+
   it('produces a well-shaped authenticated remote URL that carries a credential', async () => {
     const client = createFakeRepoClient();
     const url = await client.authenticatedRemoteUrl();

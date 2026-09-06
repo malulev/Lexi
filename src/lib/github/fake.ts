@@ -1,5 +1,5 @@
 import type { CommentInfo, PullRequestInfo, RefInfo, RepoClient } from './types';
-import { RefAlreadyExistsError } from './types';
+import { RefAlreadyExistsError, RevertNotAtTipError } from './types';
 
 /**
  * An in-memory `RepoClient`, faithful to the same behaviours the real client
@@ -57,8 +57,12 @@ function buildInitialState(seed: FakeRepoClientSeed | undefined, nowIso: () => s
   return {
     defaultBranch,
     files: { ...(seed?.files ?? {}) },
-    refs: { [headsRef(defaultBranch)]: { ref: headsRef(defaultBranch), sha: genesisSha, committedAt: at } },
-    commits: { [genesisSha]: { sha: genesisSha, tree: 'fake-genesis-tree', parents: [], committedAt: at } },
+    refs: {
+      [headsRef(defaultBranch)]: { ref: headsRef(defaultBranch), sha: genesisSha, committedAt: at },
+    },
+    commits: {
+      [genesisSha]: { sha: genesisSha, tree: 'fake-genesis-tree', parents: [], committedAt: at },
+    },
     pullRequests: [...(seed?.pullRequests ?? [])],
     comments: {},
   };
@@ -222,7 +226,12 @@ async function mergePullRequest(ctx: Ctx, number: number): Promise<{ sha: string
     sha: mergeSha,
     committedAt: ctx.nowIso(),
   };
-  Object.assign(pr, { merged: true, state: 'closed', mergeCommitSha: mergeSha, updatedAt: ctx.nowIso() });
+  Object.assign(pr, {
+    merged: true,
+    state: 'closed',
+    mergeCommitSha: mergeSha,
+    updatedAt: ctx.nowIso(),
+  });
   return { sha: mergeSha };
 }
 
@@ -234,6 +243,10 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
   const mainlineParent = ensureCommit(ctx, mainlineParentSha);
   const currentTip = ctx.state.refs[headsRef(branch)];
   if (!currentTip) throw new Error(`no such branch: ${branch}`);
+  // A revert reverses only this commit while it is still the tip; once later
+  // commits have landed, replaying the mainline tree would discard them, so
+  // the operation refuses rather than reset (mirrors the real client).
+  if (currentTip.sha !== sha) throw new RevertNotAtTipError(sha, branch, currentTip.sha);
 
   const revertSha = nextSha(ctx);
   ctx.state.commits[revertSha] = {
@@ -242,7 +255,11 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
     parents: [currentTip.sha],
     committedAt: ctx.nowIso(),
   };
-  ctx.state.refs[headsRef(branch)] = { ref: headsRef(branch), sha: revertSha, committedAt: ctx.nowIso() };
+  ctx.state.refs[headsRef(branch)] = {
+    ref: headsRef(branch),
+    sha: revertSha,
+    committedAt: ctx.nowIso(),
+  };
   return { sha: revertSha };
 }
 
@@ -280,7 +297,9 @@ async function authenticatedRemoteUrl(): Promise<string> {
   return 'https://x-access-token:fake-installation-token@github.com/fake-owner/fake-repo.git';
 }
 
-export function createFakeRepoClient(seed?: FakeRepoClientSeed): RepoClient & { readonly state: FakeState } {
+export function createFakeRepoClient(
+  seed?: FakeRepoClientSeed,
+): RepoClient & { readonly state: FakeState } {
   const clock = seed?.now ?? (() => new Date());
   const nowIso = (): string => clock().toISOString();
   const state = buildInitialState(seed, nowIso);

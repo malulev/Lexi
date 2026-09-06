@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { CheckRepoActions, simpleGit, type SimpleGit } from 'simple-git';
+import { hardenedGit } from '@/lib/git/harden';
 import type { Mirror, UpToDateOutcome, WorkingTree } from './types';
 
 /**
@@ -75,11 +76,7 @@ async function refExists(git: SimpleGit, ref: string): Promise<boolean> {
  * Points the fresh clone at `branch`, creating it from `baseBranch` when the
  * mirror does not yet have it, and returns the commit the tree started from.
  */
-async function resolveBranch(
-  tree: SimpleGit,
-  branch: string,
-  baseBranch: string,
-): Promise<string> {
+async function resolveBranch(tree: SimpleGit, branch: string, baseBranch: string): Promise<string> {
   const current = (await tree.revparse(['--abbrev-ref', 'HEAD'])).trim();
   if (current !== branch) {
     if (await refExists(tree, `refs/remotes/origin/${branch}`)) {
@@ -109,7 +106,7 @@ async function createWorkingTree(
   await mkdir(workRoot, { recursive: true });
   const dir = path.join(workRoot, randomUUID());
   await simpleGit().clone(cacheDir, dir);
-  const tree = simpleGit(dir);
+  const tree = hardenedGit(dir);
   const baseSha = await resolveBranch(tree, branch, baseBranch);
   // R2 / FR-015: no remote at all, so pushing from inside the tree is
   // impossible rather than merely forbidden.
@@ -144,7 +141,7 @@ async function bringUpToDate(
   await mkdir(workRoot, { recursive: true });
   const dir = path.join(workRoot, randomUUID());
   await simpleGit().clone(cacheDir, dir);
-  const tree = simpleGit(dir);
+  const tree = hardenedGit(dir);
   const dispose = () => rm(dir, { recursive: true, force: true });
 
   try {
@@ -226,7 +223,13 @@ export function createMirror(options: CreateMirrorOptions): Mirror {
     },
 
     bringUpToDate(branch: string, baseBranch: string) {
-      return bringUpToDate(options.cacheDir, options.workRoot, branch, baseBranch, options.author ?? HOST_AUTHOR);
+      return bringUpToDate(
+        options.cacheDir,
+        options.workRoot,
+        branch,
+        baseBranch,
+        options.author ?? HOST_AUTHOR,
+      );
     },
   };
 }

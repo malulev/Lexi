@@ -322,10 +322,39 @@ describe('createRepoClient', () => {
     });
   });
 
-  it('reverts a merge on the default branch by replaying the mainline tree onto the branch tip', async () => {
+  it('reverts a merge when it is still the branch tip, replaying the mainline tree', async () => {
+    const mergeSha = 'aa218f56b14c9653891f9e74264a383fa43fefbd';
+    // The branch tip IS the merge being reverted, so no later work is at risk
+    // and the reversal is exact.
+    const refAtMerge: Fixture = {
+      status: 200,
+      body: {
+        ref: 'refs/heads/main',
+        object: { type: 'commit', sha: mergeSha },
+      },
+    };
     const { fetch } = fakeFetch({
-      'GET /repos/acme/site/git/commits/aa218f56b14c9653891f9e74264a383fa43fefbd':
-        commitGet as Fixture,
+      [`GET /repos/acme/site/git/commits/${mergeSha}`]: commitGet as Fixture,
+      'GET /repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405':
+        commitGetParent as Fixture,
+      'GET /repos/acme/site/git/ref/heads/main': refAtMerge,
+      'POST /repos/acme/site/git/commits': commitCreate as Fixture,
+      'PATCH /repos/acme/site/git/refs/heads/main': refUpdate as Fixture,
+    });
+    const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
+
+    const result = await client.revertCommit(mergeSha, 'main');
+
+    expect(result).toEqual({ sha: '9999999999999999999999999999999999feed' });
+  });
+
+  it('refuses to revert a merge once later commits have moved the branch on, so none are discarded', async () => {
+    const mergeSha = 'aa218f56b14c9653891f9e74264a383fa43fefbd';
+    // ref-get-main.json's tip is a later commit (c3c3…), not the merge — the
+    // exact situation where the old construction would have thrown away the
+    // work since. It must refuse, and write nothing.
+    const { fetch, calls } = fakeFetch({
+      [`GET /repos/acme/site/git/commits/${mergeSha}`]: commitGet as Fixture,
       'GET /repos/acme/site/git/commits/b0b1b2b3b4b5b6b7b8b9babcbdbebf0102030405':
         commitGetParent as Fixture,
       'GET /repos/acme/site/git/ref/heads/main': refGetMain as Fixture,
@@ -334,9 +363,10 @@ describe('createRepoClient', () => {
     });
     const client = createRepoClient(makeEnv(), { minter: fakeMinter(), fetch });
 
-    const result = await client.revertCommit('aa218f56b14c9653891f9e74264a383fa43fefbd', 'main');
-
-    expect(result).toEqual({ sha: '9999999999999999999999999999999999feed' });
+    await expect(client.revertCommit(mergeSha, 'main')).rejects.toThrow(/advanced/i);
+    // No commit created and no ref moved: the refusal leaves the branch untouched.
+    expect(calls.some((call) => call.startsWith('POST /repos/acme/site/git/commits'))).toBe(false);
+    expect(calls.some((call) => call.startsWith('PATCH '))).toBe(false);
   });
 
   it('builds the authenticated remote URL from the current installation token, never logging it', async () => {

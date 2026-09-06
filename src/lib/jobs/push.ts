@@ -1,4 +1,4 @@
-import { simpleGit } from 'simple-git';
+import { hardenedGit } from '@/lib/git/harden';
 import type { WorkingTree } from '@/lib/mirror/types';
 
 /**
@@ -15,7 +15,7 @@ export async function pushBranch(
   branch: string,
   remoteUrl: string,
 ): Promise<void> {
-  const git = simpleGit(tree.dir);
+  const git = hardenedGit(tree.dir);
 
   try {
     await git.raw(['push', remoteUrl, `HEAD:refs/heads/${branch}`]);
@@ -28,5 +28,8 @@ export async function pushBranch(
 
 function redactRemote(cause: unknown, remoteUrl: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
-  return message.split(remoteUrl).join('<remote>').replace(/x-access-token:[^@\s]+/g, '<redacted>');
+  return message
+    .split(remoteUrl)
+    .join('<remote>')
+    .replace(/x-access-token:[^@\s]+/g, '<redacted>');
 }

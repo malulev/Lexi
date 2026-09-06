@@ -56,6 +56,14 @@ async function widen(path: string): Promise<void> {
     await chmod(path, mode | DIRECTORY_BITS);
     const entries = await readdir(path);
     for (const entry of entries) {
+      // `.git` is never widened. The agent container has no git and never
+      // reads it, but the host runs git against this tree after the agent —
+      // and git executes hooks and a filesystem monitor from inside `.git`.
+      // Leaving `.git` owned and writable only by the host is what keeps a
+      // prompt-injected agent from planting a `pre-push` hook or a
+      // `core.fsmonitor` command that would then run on the host with the
+      // push credential (see lib/git/harden.ts for the second layer).
+      if (entry === '.git') continue;
       await widen(join(path, entry));
     }
     return;

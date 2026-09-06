@@ -3,7 +3,7 @@ import type { Env } from '@/types';
 import type { TokenMinter } from './auth';
 import { createTokenMinter } from './auth';
 import type { CommentInfo, PullRequestInfo, RefInfo, RepoClient } from './types';
-import { RefAlreadyExistsError } from './types';
+import { isRevertNotAtTipError, RefAlreadyExistsError, RevertNotAtTipError } from './types';
 
 /**
  * The repository client. Everything the rest of the installation knows about
@@ -160,7 +160,12 @@ async function getRef(ctx: Ctx, ref: string): Promise<RefInfo | null> {
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const { data } = await octokit.rest.git.getRef({ owner, repo, ref: stripRefsPrefix(ref), headers });
+    const { data } = await octokit.rest.git.getRef({
+      owner,
+      repo,
+      ref: stripRefsPrefix(ref),
+      headers,
+    });
     const sha = data.object.sha;
     const commit = await octokit.rest.git.getCommit({ owner, repo, commit_sha: sha, headers });
     return { ref: data.ref, sha, committedAt: commit.data.committer.date };
@@ -174,7 +179,12 @@ async function createLockCommit(ctx: Ctx, message: string, parentSha: string): P
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const parent = await octokit.rest.git.getCommit({ owner, repo, commit_sha: parentSha, headers });
+    const parent = await octokit.rest.git.getCommit({
+      owner,
+      repo,
+      commit_sha: parentSha,
+      headers,
+    });
     const created = await octokit.rest.git.createCommit({
       owner,
       repo,
@@ -239,7 +249,13 @@ async function listPullRequests(ctx: Ctx): Promise<PullRequestInfo[]> {
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const { data } = await octokit.rest.pulls.list({ owner, repo, state: 'all', per_page: 100, headers });
+    const { data } = await octokit.rest.pulls.list({
+      owner,
+      repo,
+      state: 'all',
+      per_page: 100,
+      headers,
+    });
     return data.map(toPullRequestInfo);
   } catch (error) {
     throw describeError('list pull requests', repoSlug, error);
@@ -254,7 +270,13 @@ async function updatePullRequest(
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const { data } = await octokit.rest.pulls.update({ owner, repo, pull_number: number, ...input, headers });
+    const { data } = await octokit.rest.pulls.update({
+      owner,
+      repo,
+      pull_number: number,
+      ...input,
+      headers,
+    });
     return toPullRequestInfo(data);
   } catch (error) {
     throw describeError(`update pull request #${number}`, repoSlug, error);
@@ -266,7 +288,12 @@ async function listComments(ctx: Ctx, number: number): Promise<CommentInfo[]> {
   try {
     const headers = await ctx.authHeaders();
     // Ascending by creation time is the API default: creation order, as required.
-    const { data } = await octokit.rest.issues.listComments({ owner, repo, issue_number: number, headers });
+    const { data } = await octokit.rest.issues.listComments({
+      owner,
+      repo,
+      issue_number: number,
+      headers,
+    });
     return data.map(toCommentInfo);
   } catch (error) {
     throw describeError(`list comments on #${number}`, repoSlug, error);
@@ -277,7 +304,13 @@ async function createComment(ctx: Ctx, number: number, body: string): Promise<Co
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: number, body, headers });
+    const { data } = await octokit.rest.issues.createComment({
+      owner,
+      repo,
+      issue_number: number,
+      body,
+      headers,
+    });
     return toCommentInfo(data);
   } catch (error) {
     throw describeError(`create comment on #${number}`, repoSlug, error);
@@ -288,7 +321,13 @@ async function updateComment(ctx: Ctx, commentId: number, body: string): Promise
   const { octokit, owner, repo, repoSlug } = ctx;
   try {
     const headers = await ctx.authHeaders();
-    const { data } = await octokit.rest.issues.updateComment({ owner, repo, comment_id: commentId, body, headers });
+    const { data } = await octokit.rest.issues.updateComment({
+      owner,
+      repo,
+      comment_id: commentId,
+      body,
+      headers,
+    });
     return toCommentInfo(data);
   } catch (error) {
     throw describeError(`update comment ${commentId}`, repoSlug, error);
@@ -336,6 +375,15 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
       headers,
     });
     const currentTip = await octokit.rest.git.getRef({ owner, repo, ref: refPath, headers });
+    // Revert exactly this commit and nothing else. Reconstructing the mainline
+    // parent's tree is a true single-commit reversal only while that commit is
+    // still the branch tip; if later commits have landed, replaying the old
+    // tree would silently discard them. The Git Data API has no three-way
+    // revert that could keep them, so the safe answer is to refuse rather than
+    // reset — the caller surfaces this as "your website has moved on".
+    if (currentTip.data.object.sha !== sha) {
+      throw new RevertNotAtTipError(sha, branch, currentTip.data.object.sha);
+    }
     const created = await octokit.rest.git.createCommit({
       owner,
       repo,
@@ -347,6 +395,10 @@ async function revertCommit(ctx: Ctx, sha: string, branch: string): Promise<{ sh
     await octokit.rest.git.updateRef({ owner, repo, ref: refPath, sha: created.data.sha, headers });
     return { sha: created.data.sha };
   } catch (error) {
+    // A refusal to revert a non-tip commit is a decision, not a transport
+    // fault, so it must reach the caller with its type intact rather than be
+    // rewrapped as an opaque "github revert failed".
+    if (isRevertNotAtTipError(error)) throw error;
     throw describeError(`revert commit ${sha} on ${branch}`, repoSlug, error);
   }
 }
@@ -390,7 +442,10 @@ async function authenticatedRemoteUrl(ctx: Ctx, minter: TokenMinter): Promise<st
   return `https://x-access-token:${token}@github.com/${ctx.owner}/${ctx.repo}.git`;
 }
 
-export function createRepoClient(env: Env, deps?: { minter?: TokenMinter; fetch?: typeof fetch }): RepoClient {
+export function createRepoClient(
+  env: Env,
+  deps?: { minter?: TokenMinter; fetch?: typeof fetch },
+): RepoClient {
   const minter = deps?.minter ?? createTokenMinter(env);
   const ctx: Ctx = {
     owner: env.githubRepoOwner,

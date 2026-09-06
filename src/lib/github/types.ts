@@ -48,6 +48,28 @@ export class NotFoundError extends Error {
 }
 
 /**
+ * Thrown when a revert is asked for a commit that is no longer the branch tip.
+ *
+ * Reverting reconstructs the state before a merge, which reverses exactly that
+ * one change only while the merge is still the tip. Once later commits have
+ * landed, the same construction would discard them, and the Git Data API has
+ * no three-way revert that could keep them — so the operation refuses. The
+ * caller reports this to the client as a website that has moved on since.
+ */
+export class RevertNotAtTipError extends Error {
+  constructor(
+    public readonly sha: string,
+    public readonly branch: string,
+    public readonly tip: string,
+  ) {
+    super(
+      `refusing to revert ${sha}: ${branch} has advanced to ${tip}, so reverting would discard the commits since`,
+    );
+    this.name = 'RevertNotAtTipError';
+  }
+}
+
+/**
  * Recognise these errors by name, never by `instanceof`.
  *
  * The installation is one object per process (src/lib/installation.ts), but
@@ -63,6 +85,10 @@ export function isRefAlreadyExistsError(error: unknown): error is RefAlreadyExis
 
 export function isNotFoundError(error: unknown): error is NotFoundError {
   return error instanceof Error && error.name === 'NotFoundError';
+}
+
+export function isRevertNotAtTipError(error: unknown): error is RevertNotAtTipError {
+  return error instanceof Error && error.name === 'RevertNotAtTipError';
 }
 
 export interface RepoClient {

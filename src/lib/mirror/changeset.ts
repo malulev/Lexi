@@ -1,6 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { simpleGit, type SimpleGit, type StatusResult } from 'simple-git';
+import { type SimpleGit, type StatusResult } from 'simple-git';
+import { hardenedGit } from '@/lib/git/harden';
 import type { ChangedFile, ChangeKind } from '@/types';
 import type { ChangeSet, DeriveChangeSet, WorkingTree } from './types';
 
@@ -134,7 +135,7 @@ async function diffLinesFor(
  * that edits an existing line (contracts/repo-files.md).
  */
 export const deriveChangeSet: DeriveChangeSet = async (tree: WorkingTree): Promise<ChangeSet> => {
-  const git = simpleGit(tree.dir);
+  const git = hardenedGit(tree.dir);
   const status = await git.status(['--untracked-files=all']);
   const classified = classifyStatus(status);
 
@@ -177,7 +178,7 @@ export async function commitPermittedPaths(
     throw new Error('commitPermittedPaths called with no permitted files to commit');
   }
 
-  const git = simpleGit(tree.dir);
+  const git = hardenedGit(tree.dir);
   // Local to this throwaway working tree only — the host's commit identity
   // must not depend on whatever git happens to be configured on the host.
   await git.addConfig('user.name', author.name);

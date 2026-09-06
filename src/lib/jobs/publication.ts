@@ -7,7 +7,7 @@ import {
   type PublishState,
 } from '@/lib/conversations';
 import { readChangeFreshness } from '@/lib/github/staleness';
-import type { RepoClient } from '@/lib/github/types';
+import { isRevertNotAtTipError, type RepoClient } from '@/lib/github/types';
 import type { JobBus } from '@/lib/jobs/bus';
 import { BRINGING_UP_TO_DATE, PUBLISH_REFUSALS, UNDO_REFUSALS } from '@/lib/jobs/messages';
 import { waitForPreview } from '@/lib/jobs/preview';
@@ -71,13 +71,17 @@ export interface PublicationInput {
 }
 
 export type PublicationEnding =
-  | { outcome: 'succeeded'; liveUrl?: string }
-  | { outcome: 'failed'; errorCode: ErrorCode };
+  { outcome: 'succeeded'; liveUrl?: string } | { outcome: 'failed'; errorCode: ErrorCode };
 
 export type PublicationBegun =
   | { ok: false; reason: 'not_found' }
   /** The conversation is not in a state where the act means anything. Nothing was announced. */
-  | { ok: false; reason: 'refused'; errorCode: 'nothing_to_publish' | 'nothing_to_undo'; message: string }
+  | {
+      ok: false;
+      reason: 'refused';
+      errorCode: 'nothing_to_publish' | 'nothing_to_undo';
+      message: string;
+    }
   /** The act was attempted and could not go ahead. The client saw it fail on the trail. */
   | { ok: false; reason: 'failed'; errorCode: ErrorCode; cause?: unknown }
   | {
@@ -138,6 +142,10 @@ export async function beginPublication(
         ? (await deps.client.mergePullRequest(input.conversationNumber)).sha
         : (await deps.client.revertCommit(safety.publishedSha, safety.defaultBranch)).sha;
   } catch (cause) {
+    // The site advanced between the freshness check and the revert. Not a
+    // fault: undoing now would take newer work with it, so it is refused in
+    // the client's own words rather than reported as a crash.
+    if (isRevertNotAtTipError(cause)) return fail('out_of_date', cause);
     return fail('internal_error', cause);
   }
 
@@ -156,11 +164,14 @@ export async function beginPublication(
     // The act has happened and the site's history says so; only the audit
     // entry is missing. Reported as a failure so nobody is told it went
     // smoothly, and logged with the commit so the entry can be written by hand.
-    console.error(`[webagent] ${input.kind} on conversation ${input.conversationNumber} could not be recorded`, {
-      requestId,
-      commitSha,
-      cause,
-    });
+    console.error(
+      `[webagent] ${input.kind} on conversation ${input.conversationNumber} could not be recorded`,
+      {
+        requestId,
+        commitSha,
+        cause,
+      },
+    );
     return fail('internal_error', cause);
   }
 
@@ -186,15 +197,24 @@ export async function beginPublication(
 function refuse(kind: PublicationKind, state: PublishState): PublicationBegun | null {
   if (kind === 'publish') {
     if (state === 'ready') return null;
-    return { ok: false, reason: 'refused', errorCode: 'nothing_to_publish', message: PUBLISH_REFUSALS[state] };
+    return {
+      ok: false,
+      reason: 'refused',
+      errorCode: 'nothing_to_publish',
+      message: PUBLISH_REFUSALS[state],
+    };
   }
   if (state === 'published') return null;
-  return { ok: false, reason: 'refused', errorCode: 'nothing_to_undo', message: UNDO_REFUSALS[state] };
+  return {
+    ok: false,
+    reason: 'refused',
+    errorCode: 'nothing_to_undo',
+    message: UNDO_REFUSALS[state],
+  };
 }
 
 type Safety =
-  | { ok: true; defaultBranch: string; publishedSha: string }
-  | { ok: false; errorCode: ErrorCode };
+  { ok: true; defaultBranch: string; publishedSha: string } | { ok: false; errorCode: ErrorCode };
 
 /**
  * What must be true before the act, checked under `gating` so a client sees
@@ -266,7 +286,12 @@ async function bringUpToDate(
   }
 
   const preview = await waitForPreview(
-    { netlify: deps.netlify, bus: deps.bus, requestId: target.requestId, ...(deps.sleep ? { sleep: deps.sleep } : {}) },
+    {
+      netlify: deps.netlify,
+      bus: deps.bus,
+      requestId: target.requestId,
+      ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    },
     {
       conversationNumber: input.conversationNumber,
       commitSha: outcome.sha,
@@ -300,14 +325,25 @@ async function watchBuild(
   input: { requestId: string; commitSha: string; liveUrl?: string },
 ): Promise<PublicationEnding> {
   const now = () => (deps.now ?? (() => new Date()))().getTime();
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep =
+    deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const interval = deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const deadline = now() + (deps.deployTimeoutMs ?? DEFAULT_DEPLOY_TIMEOUT_MS);
 
-  const ending = await pollUntilBuilt(deps, input.commitSha, input.liveUrl, { now, sleep, interval, deadline });
+  const ending = await pollUntilBuilt(deps, input.commitSha, input.liveUrl, {
+    now,
+    sleep,
+    interval,
+    deadline,
+  });
 
   const finalStage: Stage = ending.outcome === 'succeeded' ? 'succeeded' : 'failed';
-  deps.bus.publish({ type: 'stage', requestId: input.requestId, stage: finalStage, at: new Date(now()).toISOString() });
+  deps.bus.publish({
+    type: 'stage',
+    requestId: input.requestId,
+    stage: finalStage,
+    at: new Date(now()).toISOString(),
+  });
   deps.bus.publish({
     type: 'done',
     requestId: input.requestId,
@@ -329,7 +365,12 @@ async function pollUntilBuilt(
   deps: PublicationDeps,
   commitSha: string,
   liveUrl: string | undefined,
-  clock: { now: () => number; sleep: (ms: number) => Promise<void>; interval: number; deadline: number },
+  clock: {
+    now: () => number;
+    sleep: (ms: number) => Promise<void>;
+    interval: number;
+    deadline: number;
+  },
 ): Promise<PublicationEnding> {
   while (clock.now() < clock.deadline) {
     let deploy = null;
@@ -340,7 +381,8 @@ async function pollUntilBuilt(
       console.error('[webagent] could not read the deploy list while waiting for a build', cause);
     }
     const effect = deploy ? deployEffect(deploy) : { kind: 'ignore' as const };
-    if (effect.kind === 'preview_ready') return { outcome: 'succeeded', ...(liveUrl ? { liveUrl } : {}) };
+    if (effect.kind === 'preview_ready')
+      return { outcome: 'succeeded', ...(liveUrl ? { liveUrl } : {}) };
     if (effect.kind === 'build_failed') return { outcome: 'failed', errorCode: 'build_failed' };
 
     await clock.sleep(Math.min(clock.interval, Math.max(0, clock.deadline - clock.now())));

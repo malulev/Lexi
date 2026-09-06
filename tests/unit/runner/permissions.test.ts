@@ -82,6 +82,36 @@ describe('makeAgentWritable', () => {
     expect(await modeOf(file)).toBe(0o606);
   });
 
+  it('never widens .git, so the agent cannot plant a hook or fsmonitor the host would run', async () => {
+    const root = await makeRoot();
+    const gitDir = join(root, '.git');
+    const hooks = join(gitDir, 'hooks');
+    await mkdir(hooks, { recursive: true });
+    const config = join(gitDir, 'config');
+    await writeFile(config, '[core]\n');
+    const hook = join(hooks, 'pre-push');
+    await writeFile(hook, '#!/bin/sh\n');
+    await chmod(config, 0o600);
+    await chmod(hook, 0o700);
+    await chmod(hooks, 0o700);
+    await chmod(gitDir, 0o700);
+
+    // A tracked file outside .git still gets widened, so this is not a no-op.
+    const page = join(root, 'index.html');
+    await writeFile(page, '<h1></h1>');
+    await chmod(page, 0o600);
+
+    await makeAgentWritable(root);
+
+    expect(await modeOf(page)).toBe(0o606);
+    // .git and everything under it keep their host-only modes: no group or
+    // other write, so the container's foreign uid cannot touch them.
+    expect(await modeOf(gitDir)).toBe(0o700);
+    expect(await modeOf(hooks)).toBe(0o700);
+    expect(await modeOf(config)).toBe(0o600);
+    expect(await modeOf(hook)).toBe(0o700);
+  });
+
   it('never follows a symbolic link out of the tree', async () => {
     const root = await makeRoot();
     const outside = await makeRoot();
