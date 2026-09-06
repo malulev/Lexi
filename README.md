@@ -406,3 +406,13 @@ multi-model routing, billing, and any application database.
 
 See `.specify/memory/constitution.md` for the principles this is held to, and
 `specs/001-conversational-site-editing/` for the specification, plan and contracts.
+
+## License
+
+Copyright (C) 2026 Amit Malul Lev. Licensed under the **GNU Affero General Public License v3.0 or
+later** — the full text is in [`LICENSE`](LICENSE).
+
+Use it, change it, run it for your clients. The one obligation that matters here is section 13: if
+you offer a modified version to anyone over a network — which is the normal way to run this — you
+must offer those users its source. Running it unmodified, or modifying it privately without
+offering it to anyone, obliges you to nothing.
