@@ -370,6 +370,10 @@ async function runAgent(
   model: string,
 ): Promise<AgentPass> {
   const timeoutMs = deps.config.settings.maxRequestMinutes * 60_000;
+  // The agent's own output is otherwise ephemeral — streamed to the browser and
+  // then gone. A failed run needs its last words kept, so the reason it failed
+  // reaches the durable record and the server log rather than a bare exit code.
+  const outputTail: string[] = [];
   const run = await deps.runner.run({
     requestId,
     workDir: prepared.tree.dir,
@@ -377,7 +381,11 @@ async function runAgent(
     prompt: prepared.prompt,
     model,
     timeoutMs,
-    onOutput: (text) => deps.bus.publish({ type: 'output', requestId, text }),
+    onOutput: (text) => {
+      outputTail.push(text);
+      if (outputTail.length > AGENT_OUTPUT_TAIL_LINES) outputTail.shift();
+      deps.bus.publish({ type: 'output', requestId, text });
+    },
   });
 
   // The runner already read `/control/result.json` and hands it back; reading
@@ -390,24 +398,24 @@ async function runAgent(
   };
   const summary = result?.summary?.trim() || 'I made the change you asked for.';
 
+  const failed = (errorCode: ErrorCode, base: string): AgentPass => {
+    const errorDetail = appendAgentOutput(base, outputTail);
+    // Logged here, not only stored: a non-zero exit used to leave nothing in
+    // the server log, so a failed request could only be diagnosed by reading
+    // the durable record. This puts the agent's own last words in `docker logs`.
+    console.error(`[webagent] agent run failed for request ${requestId}`, {
+      errorCode,
+      exitCode: run.exitCode,
+      detail: errorDetail,
+    });
+    return { failure: { outcome: 'failed', errorCode, errorDetail, prose: null }, summary, cost };
+  };
+
   if (run.outcome === 'timeout') {
-    return {
-      failure: { outcome: 'failed', errorCode: 'agent_timeout', prose: null },
-      summary,
-      cost,
-    };
+    return failed('agent_timeout', DEFAULT_ERROR_DETAIL.agent_timeout);
   }
   if (run.outcome === 'error') {
-    return {
-      failure: {
-        outcome: 'failed',
-        errorCode: 'internal_error',
-        errorDetail: run.errorDetail,
-        prose: null,
-      },
-      summary,
-      cost,
-    };
+    return failed('internal_error', run.errorDetail ?? 'the agent runner reported an error');
   }
 
   // The container's exit status is the agent's own verdict on its run
@@ -418,19 +426,29 @@ async function runAgent(
   // behind. Reading their absence as "nothing needed changing" is worse still
   // — it reports a crash as a considered decision.
   if (run.exitCode !== null && run.exitCode !== 0) {
-    return {
-      failure: {
-        outcome: 'failed',
-        errorCode: 'internal_error',
-        errorDetail: `the agent container exited with status ${run.exitCode}`,
-        prose: null,
-      },
-      summary,
-      cost,
-    };
+    return failed('internal_error', `the agent container exited with status ${run.exitCode}`);
   }
 
   return { summary, cost };
+}
+
+/** How many trailing lines of agent output to keep for a failed run's detail. */
+const AGENT_OUTPUT_TAIL_LINES = 40;
+
+/**
+ * Appends the agent's last output lines to a failure detail, so the record and
+ * the log say *why* it failed and not only that it did. Each line is capped and
+ * the tail is bounded — this is a diagnostic for the developer (it lives in the
+ * record's machine block and the server log, never in the client's prose, per
+ * Principle I), not something a client ever reads.
+ */
+function appendAgentOutput(base: string, outputTail: string[]): string {
+  const tail = outputTail
+    .slice(-20)
+    .map((line) => (line.length > 500 ? `${line.slice(0, 500)}…` : line))
+    .join('\n')
+    .trim();
+  return tail ? `${base}\n--- agent output (last lines) ---\n${tail}` : base;
 }
 
 interface Verdict {
