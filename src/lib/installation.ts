@@ -39,6 +39,15 @@ export interface Installation {
   bus: JobBus;
   lock: ReturnType<typeof createLock>;
   config: ConfigCache;
+  /**
+   * Where a request's per-run control directory is created. It MUST sit under
+   * `WEBAGENT_STATE_DIR`, because that is the one path bind-mounted at the same
+   * absolute location inside this container and on the host — the daemon
+   * resolves the agent's `/control` mount on the host, so a control dir under
+   * `/tmp` (this container's `/tmp`, which the host has never heard of) mounts
+   * an empty directory and the agent finds no `prompt.json`.
+   */
+  workRoot: string;
 }
 
 const AGENT_IMAGE = process.env.AGENT_IMAGE ?? 'webagent/agent:latest';
@@ -81,6 +90,9 @@ export function getInstallation(): Installation {
     }),
     runner: createDockerRunner({ image: AGENT_IMAGE, apiKey: env.openrouterApiKey, docker }),
     slots: createDockerSlots({ docker, limit: env.maxConcurrentRuns }),
+    // Under the shared state dir, so the agent's /control bind mount resolves
+    // on the host daemon (see the field's note above).
+    workRoot: join(STATE_DIR, 'control'),
     mailer: createMailer(env),
     bus: jobBus,
     lock: createLock(client),

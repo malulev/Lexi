@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -308,8 +308,11 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
 
   // The control directory sits outside the working tree by construction, so a
   // control file can never become part of a change to the client's site,
-  // whatever the agent does with the tree it was given (FR-015).
+  // whatever the agent does with the tree it was given (FR-015). It must live
+  // under a directory the host daemon can resolve (the shared state dir in
+  // production); `mkdtemp` needs that parent to exist first.
   const root = deps.workRoot ?? tmpdir();
+  await mkdir(root, { recursive: true });
   const controlDir = await mkdtemp(join(root, `webagent-control-${requestId}-`));
 
   // Attachments go into the tree before the agent sees it, as ordinary files

@@ -53,6 +53,7 @@ function installHarness(current: Harness): void {
     bus: current.bus,
     lock: current.lock,
     config: createConfigCache(async () => CONFIG),
+    workRoot: current.deps.workRoot ?? '',
   };
   setInstallation(installation);
   cookieJar.value = issueSession('jane@client.example', current.deps.env);

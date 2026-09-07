@@ -62,6 +62,7 @@ function installHarness(current: Harness, post: Mailer): void {
     bus: current.bus,
     lock: current.lock,
     config: createConfigCache(async () => CONFIG),
+    workRoot: current.deps.workRoot ?? '',
   };
   setInstallation(installation);
 }

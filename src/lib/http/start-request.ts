@@ -79,6 +79,9 @@ async function startRequestOrThrow(input: StartInput): Promise<BeginOutcome> {
       netlify: installation.netlify,
       bus: installation.bus,
       env: installation.env,
+      // Control directories go under the shared state dir, never this
+      // container's /tmp, or the agent's /control mounts empty on the host.
+      workRoot: installation.workRoot,
       onFinished: (record, commentId) =>
         notifyClients(
           installation,
