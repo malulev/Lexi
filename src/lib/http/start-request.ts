@@ -209,9 +209,25 @@ async function notifyClients(
   }
 }
 
-/** An abandoned request is not announced: nobody asked for the ending it got. */
-function notificationEventFor(record: RequestRecord): NotificationEvent | null {
-  if (record.outcome === 'succeeded') return 'preview_ready';
+/**
+ * Which endings are worth an email, and which are not.
+ *
+ * A ready preview is not one of them. The client asked for the change moments
+ * ago and is looking at the conversation that produced it, where the preview
+ * appears on its own; an email about it arrives after they have already seen
+ * it. The message that earns an inbox is the one about the live website, and
+ * `notifyPublication` (notify/email.ts) sends that on publish and on undo.
+ *
+ * A refusal and a failure still do, because those are endings the client did
+ * not ask for and cannot anticipate — they may well have closed the page
+ * believing the change was on its way. An abandoned request is announced to
+ * nobody: nobody asked for the ending it got.
+ *
+ * `preview_ready` stays in `NotificationEvent` and keeps its template. Records
+ * already written carry it in their `notified` lists, and those must go on
+ * parsing.
+ */
+export function notificationEventFor(record: RequestRecord): NotificationEvent | null {
   if (record.outcome === 'blocked') return 'request_blocked';
   if (record.outcome === 'failed') return 'request_failed';
   return null;
