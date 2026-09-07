@@ -2,6 +2,8 @@
 
 *Say what you want changed. See it before it goes live.*
 
+![Lexi architecture: browser, app, isolated agent container, GitHub, Netlify](docs/architecture.svg)
+
 A client describes a change to their website in plain language. An agent makes it on a branch, a
 preview is built, and the client presses one button to publish. Nothing reaches the live site
 without a person approving it.
@@ -9,6 +11,26 @@ without a person approving it.
 **One installation serves one website.** No site selector, no tenant column — install it once per
 client site, the way you would install a self-hosted CMS. There is no database: published state,
 pending changes, conversation history and the audit trail live in GitHub and Netlify.
+
+**How a request becomes a change**
+
+1. **Ask.** The client types what they want changed, picks an effort tier, and may attach a file.
+2. **Prepare.** The app takes a lock on the site (a git ref, so only one change runs at a time),
+   reads `.webagent/config.yml` and `policy.yml`, and cuts a temporary working tree with no remote
+   and no token.
+3. **Edit.** A throwaway agent container edits that tree. It has no git, no credentials and no
+   network path to the repository, so it cannot commit or push whatever the model decides.
+4. **Gate.** The host reads what changed and checks it against the site's policy: allowed paths,
+   size, hard-denied files. A refused change stops here as *blocked*.
+5. **Push.** Only the permitted paths are committed and pushed to the conversation's branch. The
+   pull request gets a comment that is both the client-facing reply and the durable record.
+6. **Preview.** Netlify builds a Deploy Preview for the pull request. The app polls (or takes the
+   webhook, whichever answers first) and streams the preview URL to the client's page.
+7. **Publish.** The client presses one button. The pull request is merged, Netlify builds the live
+   site, and *Undo* reverts that merge.
+
+No database anywhere: a conversation is a pull request, a message is a comment, the lock is a git
+ref, and the disk holds only a cache that rebuilds itself from a fresh clone.
 
 ---
 
