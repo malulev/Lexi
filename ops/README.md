@@ -33,10 +33,12 @@ loopback-only port.
 | `provision-client.sh <slug> <hostname> <port>` | root | Once per client. The user, its rootless daemon, the 0700 tree, a `.env` skeleton. Starts nothing. |
 | `release.sh [git-ref]` | root | Every deploy. Builds and pushes both images, then rolls each client forward one at a time. `--client <slug>` for one. |
 | `status.sh [<slug>]` | root | Any time. One line per client, plus the host-wide agent total. `--logs` to see why one is unhappy. |
+| `launch-client.sh <slug> <hostname> [port]` | root | The four steps above for one new client, in order, with the hand steps between them: opens `.env` in an editor, mints the secrets, runs `check:env`, waits for DNS, adds the Caddy block, checks HTTPS. Re-run after a failure; it resumes. |
 
 All four are idempotent. All four refuse rather than guess.
 
 Order: `bootstrap-host.sh` → `provision-client.sh` → fill in `.env` by hand → `release.sh`.
+Or, for one client end to end: `bootstrap-host.sh` once, then `launch-client.sh` per client.
 
 `provision-client.sh` deliberately mints no secrets and starts no stack. Secrets come from
 `npm run gen:secrets`, appended to the client's `.env` by a person; a stack started before its
@@ -81,6 +83,8 @@ docker run --rm -v /opt/lexi/src:/src:ro -v /srv/lexi/acme/.env:/secret/.env:ro 
 ops/release.sh --client acme
 
 # --- hostname and TLS -------------------------------------------------------
+# First, at the DNS provider: an A record for edit.acme.example -> this VPS's
+# public IP (and AAAA for IPv6). Caddy cannot issue a certificate until it resolves.
 cat >>/etc/caddy/Caddyfile <<'CADDY'
 edit.acme.example {
     reverse_proxy 127.0.0.1:3001

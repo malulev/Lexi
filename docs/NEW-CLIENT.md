@@ -1,0 +1,61 @@
+# New client checklist
+
+Copy this into the ticket for the client and tick it off. Replace `acme`, `edit.acme.example`
+and `3001` with the client's slug, hostname and a port no other client on the box uses.
+
+## Accounts and access
+
+- [ ] Client's site repo on GitHub, linked to a Netlify site.
+- [ ] Netlify: Site configuration → Build & deploy → **Deploy Previews** on for pull requests.
+- [ ] GitHub App installed on **this repo only**. Contents + Pull requests, read and write. Webhook off.
+      Note the App ID, download the `.pem`, note the installation ID from the URL after installing.
+- [ ] Netlify personal access token and the site ID. Own Netlify team if the token must not reach other sites.
+- [ ] OpenRouter API key with a spending limit set.
+- [ ] SMTP credentials and a from address.
+- [ ] List of client email addresses allowed to sign in.
+
+## In the client's repo
+
+- [ ] `.webagent/config.yml` with `alertContact`, `costCeilingUsd`, `model`, `maxRequestMinutes`.
+- [ ] `.webagent/policy.yml`. Count the files one normal request touches (header, footer on every
+      page, sitemap, stylesheet) before setting `maxFilesChanged`.
+- [ ] `AGENTS.md` at the repo root, from `docs/AGENTS.example.md`.
+- [ ] If pages carry a third-party `<script src>` in `<head>`, move it behind a same-origin loader
+      or new pages will be refused by `forbidExternalCode`.
+
+## On the VPS
+
+One command does this whole section, pausing for the `.env` edit, the console password and the
+TOTP secret, and waiting for DNS:
+
+```bash
+ops/launch-client.sh acme edit.acme.example        # picks the next free port
+```
+
+Create the DNS record before or while it runs. If it stops, fix what it names and re-run; it
+resumes. The manual steps, for reference or for doing one by hand:
+
+- [ ] `ops/provision-client.sh acme edit.acme.example 3001`
+- [ ] `sudoedit /srv/lexi/acme/.env`: GitHub App, Netlify, OpenRouter, SMTP, `ALLOWED_EMAILS`,
+      `PUBLIC_BASE_URL=https://edit.acme.example`, `MAX_CONCURRENT_RUNS` sized to the box.
+- [ ] Run `gen:secrets` as the client user (the provision script prints the command). Never `PORT`, only `PORT_HOST`.
+- [ ] Run `check:env` the same way. It names missing variables and prints no values.
+- [ ] Save `CONFIG_TOTP_SECRET` to an authenticator app now. There is no recovery path.
+- [ ] DNS: A record (and AAAA if applicable) for `edit.acme.example` pointing at the VPS public IP. Wait until it resolves.
+- [ ] `ops/release.sh --client acme`
+- [ ] Add the Caddy block for `edit.acme.example` → `127.0.0.1:3001` and `systemctl reload caddy`.
+- [ ] `ops/status.sh acme` shows daemon up, container up, HTTP answering.
+
+## Prove it works
+
+- [ ] Open `https://edit.acme.example`, request a sign-in link with an allowed address, receive the email.
+- [ ] Send a small change ("shorten the hero headline"). Preview appears within a few minutes.
+- [ ] Press Publish. Live site updates. Press Undo. Live site reverts.
+- [ ] Ask for a change the policy forbids. It is refused as blocked, not applied.
+- [ ] `/settings` opens with the console password and TOTP code and shows the config in force.
+
+## Hand over
+
+- [ ] Client has the URL and knows sign-in is by email link, no password.
+- [ ] `alertContact` is an inbox someone reads.
+- [ ] Backed up: the client's `.env` and the TOTP secret. Nothing else needs backing up.

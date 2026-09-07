@@ -4,6 +4,9 @@
 
 ![Lexi architecture: browser, app, isolated agent container, GitHub, Netlify](docs/architecture.svg)
 
+In a hurry? [Quickstart](docs/QUICKSTART.md) has only the commands, and the
+[new client checklist](docs/NEW-CLIENT.md) is the to-do list for onboarding a site.
+
 A client describes a change to their website in plain language. An agent makes it on a branch, a
 preview is built, and the client presses one button to publish. Nothing reaches the live site
 without a person approving it.
@@ -361,6 +364,11 @@ sudoedit /srv/lexi/acme/.env                          # GitHub App, Netlify, Ope
 
 `provision-client.sh` prints the remaining steps verbatim, including how to run `gen:secrets` and
 `check:env` in a throwaway container so the host needs no Node toolchain.
+
+Point the hostname at the box before the next step: an **A record** for `edit.acme.example` to
+the VPS's public IP, plus an AAAA record if it has IPv6. Caddy obtains its certificate on the first
+request, and it cannot until the name resolves. Set `PUBLIC_BASE_URL=https://edit.acme.example` in
+the client's `.env` so sign-in links point there too.
 
 ```bash
 ops/release.sh --client acme     # build once, deliver, start, wait for it to answer
