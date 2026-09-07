@@ -10,6 +10,7 @@ import {
 } from '@/lib/auth';
 import { clientAddress, createRateLimiter } from '@/lib/http/rate-limit';
 import { getInstallation } from '@/lib/installation';
+import { signInEmail } from '@/lib/notify/sign-in';
 
 export const runtime = 'nodejs';
 
@@ -93,11 +94,7 @@ async function requestLink(request: Request): Promise<NextResponse> {
   if (token) {
     const link = `${installation.env.publicBaseUrl}/api/auth/callback?token=${encodeURIComponent(token)}`;
     try {
-      await installation.mailer.send({
-        to: parsed.data.email,
-        subject: 'Your sign-in link',
-        text: `Open this link to sign in and edit your website:\n\n${link}\n\nThe link works for the next 15 minutes.`,
-      });
+      await installation.mailer.send({ to: parsed.data.email, ...signInEmail(link) });
     } catch (cause) {
       // A send that fails is logged, not surfaced: the answer must not vary.
       console.error('[webagent] could not send a sign-in link', cause);

@@ -8,8 +8,20 @@ import { notificationContent } from './messages';
  * The whole surface `notifyOnce` depends on, so it can be tested against
  * `createFakeMailer` without ever touching SMTP or the network.
  */
+export interface MailMessage {
+  to: string;
+  subject: string;
+  text: string;
+  /**
+   * An HTML alternative, when one is worth sending. Optional on purpose: the
+   * text part is always the complete message, and a caller with nothing to add
+   * visually should not be made to invent markup.
+   */
+  html?: string;
+}
+
 export interface Mailer {
-  send(message: { to: string; subject: string; text: string }): Promise<void>;
+  send(message: MailMessage): Promise<void>;
 }
 
 /** The real mailer, built from `SMTP_URL`. `nodemailer` is used nowhere else in this module. */
@@ -22,6 +34,9 @@ export function createMailer(env: Env): Mailer {
         to: message.to,
         subject: message.subject,
         text: message.text,
+        // Sent as multipart/alternative when present, so a text-only reader
+        // still gets the whole message.
+        ...(message.html ? { html: message.html } : {}),
       });
     },
   };
@@ -29,9 +44,9 @@ export function createMailer(env: Env): Mailer {
 
 /** An in-memory mailer for tests: records what was sent, opens no connection. */
 export function createFakeMailer(): Mailer & {
-  readonly sent: Array<{ to: string; subject: string; text: string }>;
+  readonly sent: MailMessage[];
 } {
-  const sent: Array<{ to: string; subject: string; text: string }> = [];
+  const sent: MailMessage[] = [];
   return {
     sent,
     async send(message) {
