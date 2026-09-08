@@ -81,7 +81,9 @@ function main(): void {
   }
 
   if (raw.CONFIG_TOTP_SECRET && !raw.TOTP_SECRET) {
-    console.warn('CONFIG_TOTP_SECRET is the old name; rename it to TOTP_SECRET. It still works this release.');
+    console.warn(
+      'CONFIG_TOTP_SECRET is the old name; rename it to TOTP_SECRET. It still works this release.',
+    );
   }
 
   const faults: string[] = [];

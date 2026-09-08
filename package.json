@@ -21,7 +21,8 @@
     "test:e2e": "playwright test",
     "check:env": "tsx scripts/check-env.ts",
     "gen:secrets": "tsx scripts/gen-secrets.ts",
-    "dev:session": "tsx scripts/dev-session.ts"
+    "dev:session": "tsx scripts/dev-session.ts",
+    "enroll:link": "tsx scripts/enroll-link.ts"
   },
   "dependencies": {
     "dockerode": "^4.0.9",
