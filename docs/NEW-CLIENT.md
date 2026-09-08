@@ -25,8 +25,8 @@ and `3001` with the client's slug, hostname and a port no other client on the bo
 
 ## On the VPS
 
-One command does this whole section, pausing for the `.env` edit, the console password and the
-TOTP secret, and waiting for DNS:
+One command does this whole section, pausing for the `.env` edit and waiting for DNS, and ends by
+printing the client's enrollment link:
 
 ```bash
 ops/launch-client.sh acme edit.acme.example        # picks the next free port
@@ -38,24 +38,24 @@ resumes. The manual steps, for reference or for doing one by hand:
 - [ ] `ops/provision-client.sh acme edit.acme.example 3001`
 - [ ] `sudoedit /srv/lexi/acme/.env`: GitHub App, Netlify, OpenRouter, SMTP, `ALLOWED_EMAILS`,
       `PUBLIC_BASE_URL=https://edit.acme.example`, `MAX_CONCURRENT_RUNS` sized to the box.
-- [ ] Run `gen:secrets` as the client user (the provision script prints the command). Never `PORT`, only `PORT_HOST`.
+- [ ] Run `gen:secrets` as the client user (the provision script prints the command; no password). Never `PORT`, only `PORT_HOST`.
 - [ ] Run `check:env` the same way. It names missing variables and prints no values.
-- [ ] Save `CONFIG_TOTP_SECRET` to an authenticator app now. There is no recovery path.
 - [ ] DNS: A record (and AAAA if applicable) for `edit.acme.example` pointing at the VPS public IP. Wait until it resolves.
 - [ ] `ops/release.sh --client acme`
 - [ ] Add the Caddy block for `edit.acme.example` → `127.0.0.1:3001` and `systemctl reload caddy`.
 - [ ] `ops/status.sh acme` shows daemon up, container up, HTTP answering.
+- [ ] Mint the enrollment link (`enroll:link` in the node container) and send it to the client. It works 24 hours.
 
 ## Prove it works
 
-- [ ] Open `https://edit.acme.example`, request a sign-in link with an allowed address, receive the email.
+- [ ] Open the enrollment link, scan the QR into an authenticator app.
+- [ ] Open `https://edit.acme.example`, request a sign-in link with an allowed address, receive the email, enter the code.
 - [ ] Send a small change ("shorten the hero headline"). Preview appears within a few minutes.
 - [ ] Press Publish. Live site updates. Press Undo. Live site reverts.
 - [ ] Ask for a change the policy forbids. It is refused as blocked, not applied.
-- [ ] `/settings` opens with the console password and TOTP code and shows the config in force.
 
 ## Hand over
 
-- [ ] Client has the URL and knows sign-in is by email link, no password.
+- [ ] Client has the URL and knows sign-in is the email link plus their authenticator code, no password.
 - [ ] `alertContact` is an inbox someone reads.
-- [ ] Backed up: the client's `.env` and the TOTP secret. Nothing else needs backing up.
+- [ ] Backed up: the client's `.env`. Nothing else needs backing up.

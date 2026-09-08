@@ -51,7 +51,7 @@ npm ci
 docker build -t webagent/agent:latest agent/
 
 cp .env.example .env
-npm run gen:secrets -- --password 'a console password you pick' >> .env
+npm run gen:secrets >> .env
 # fill in by hand: GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_INSTALLATION_ID, GITHUB_REPO,
 # NETLIFY_TOKEN, NETLIFY_SITE_ID, OPENROUTER_API_KEY, SMTP_URL, SMTP_FROM,
 # PUBLIC_BASE_URL=http://localhost:3000, ALLOWED_EMAILS=you@example.com
@@ -61,8 +61,8 @@ export WEBAGENT_STATE_DIR="$PWD/.webagent-state"
 npm run dev
 ```
 
-Open `http://localhost:3000`. Add `CONFIG_TOTP_SECRET` from `.env` to an authenticator app; it is
-the second factor on `/settings`.
+Enrol your authenticator once: `npm run enroll:link`, open the URL, scan the QR. Then open
+`http://localhost:3000`: sign-in is the email link followed by the six-digit code.
 
 Skip the sign-in email while testing:
 
@@ -82,9 +82,8 @@ ops/bootstrap-host.sh
 ufw allow 22,80,443/tcp && ufw --force enable
 ```
 
-Once per client, one command. It pauses for the `.env` edit, the console password and the TOTP
-secret, waits until `edit.acme.example` resolves to this box, then releases and adds the Caddy
-block:
+Once per client, one command. It pauses for the `.env` edit, waits until `edit.acme.example`
+resolves to this box, releases, adds the Caddy block, and prints the client's enrollment link:
 
 ```bash
 ops/launch-client.sh acme edit.acme.example        # picks the next free port
@@ -108,7 +107,7 @@ verbatim; they run Node in a throwaway container, so the host needs no toolchain
 ```bash
 docker run --rm -v /opt/lexi/src:/src:ro -w /build node:22-slim \
   sh -c 'cp -a /src/. /build && npm ci --silent \
-         && npm run --silent gen:secrets -- --password "a console password you pick"' \
+         && npm run --silent gen:secrets' \
   | sudo -u acme tee -a /srv/lexi/acme/.env >/dev/null
 ```
 
@@ -145,4 +144,4 @@ npm run lint && npm run typecheck && npm test && npm run test:int
 
 ## Back up
 
-Each client's `.env` and the TOTP secret in your authenticator. Nothing else.
+Each client's `.env`. Nothing else; the authenticator secret is in it.

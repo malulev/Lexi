@@ -92,16 +92,17 @@ must exist before the first request — in development too.
 
 ```bash
 cp .env.example .env
-npm run gen:secrets -- --password 'a console password you pick' >> .env
+npm run gen:secrets >> .env
 ```
 
-`gen:secrets` mints `SESSION_SECRET`, `NETLIFY_WEBHOOK_SECRET`, `CONFIG_PASSWORD_HASH` (an argon2
-hash; the password itself is never stored) and `CONFIG_TOTP_SECRET`. Use it rather than writing
-these by hand: **a dotenv file expands `$NAME` references and quoting does not stop it**, so a
-pasted argon2 hash arrives gutted. The generator escapes what it emits.
+`gen:secrets` mints `SESSION_SECRET`, `NETLIFY_WEBHOOK_SECRET` and `TOTP_SECRET`. Use it rather
+than writing these by hand: **a dotenv file expands `$NAME` references and quoting does not stop
+it**, so a pasted value can arrive gutted. The generator escapes what it emits.
 
-Add `CONFIG_TOTP_SECRET` to an authenticator app now — it is the second factor on `/settings`,
-and the only recovery path is re-running `gen:secrets`.
+Signing in takes the email link and then a six-digit code from an authenticator app seeded with
+`TOTP_SECRET`. Enrol yours with `npm run enroll:link`: open the URL it prints and scan the QR. The
+link works for 24 hours and is the only page that ever shows the secret. Losing every enrolled
+authenticator means minting a new secret and enrolling again.
 
 Fill in the rest by hand: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INSTALLATION_ID`,
 `GITHUB_REPO`, `NETLIFY_TOKEN`, `NETLIFY_SITE_ID`, `OPENROUTER_API_KEY`, `SMTP_URL`, `SMTP_FROM`,
@@ -176,7 +177,8 @@ npm run lint && npm run typecheck && npm test && npm run test:int
 |---|---|
 | `npm run check:env` | Reports missing, malformed or empty variables. Prints no values. |
 | `npm run dev:clean` | Discards `.next` and starts the dev server. Use it after any dependency change. |
-| `npm run gen:secrets -- --password '<yours>'` | Mints session secret, webhook secret, argon2 hash, TOTP secret. |
+| `npm run gen:secrets` | Mints session secret, webhook secret, authenticator secret. |
+| `npm run enroll:link` | Prints a 24-hour link that shows the authenticator QR. Send it to each client once. |
 | `npm run dev:session -- --out <path>` | Writes a curl cookie jar holding a valid session. |
 | `npm test` / `npm run test:int` | Unit tests; route handlers and startup validation against fakes. |
 | `npm run test:e2e` | Live suite — real repository, real model, real build minutes. Skips loudly unless `WEBAGENT_E2E=1`. |
@@ -240,7 +242,7 @@ the deployment. So is any key that reads like a credential (`*secret*`, `*token*
 secrets live, not a typo, and the file is refused rather than honoured.
 
 When this file is invalid the **last valid settings stay in force**, the fault goes to
-`alertContact`, and `/settings` shows it. Access control never falls open on a broken file.
+`alertContact`, and the log names it. Access control never falls open on a broken file.
 
 ### `.webagent/policy.yml` — what the agent may change
 
@@ -327,9 +329,10 @@ static site on Netlify, with a step-by-step "how to add a new page" covering hea
 Sign-in addresses (`ALLOWED_EMAILS`) and every credential. They are deployment configuration:
 write access to the site's repository must not be able to grant access to the editing interface.
 
-`/settings` shows the configuration in force, behind a password and a TOTP code, and is
-**read-only**. Changing a setting means committing to the client's repository — so an operational
-change is a reviewable, versioned edit with an author, not an unattributed mutation in a web form.
+There is no configuration page. The configuration in force is the repository's `.webagent/` files
+and the deployment's `.env`, both versioned or backed up and neither editable from the web. Changing
+a setting means committing to the client's repository — so an operational change is a reviewable,
+versioned edit with an author, not an unattributed mutation in a web form.
 
 ---
 
@@ -410,7 +413,7 @@ broken as stale.
 
 ### What to back up
 
-Each client's `.env`, and its TOTP secret in an authenticator. That is the whole list. The state
+Each client's `.env`. That is the whole list: the authenticator secret is in it. The state
 directory is a cache that rebuilds itself from a fresh clone, and everything else lives in GitHub
 and Netlify.
 

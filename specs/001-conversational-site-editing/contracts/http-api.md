@@ -6,14 +6,16 @@ removing an address takes effect on the next request.
 
 ## Authentication
 
-| Route                | Method | Body        | Response                                                     |
-| -------------------- | ------ | ----------- | ------------------------------------------------------------ |
-| `/api/auth/request`  | POST   | `{ email }` | `202` always — never reveals whether an address is permitted |
-| `/api/auth/callback` | GET    | `?token`    | `302` to the conversation list, sets the session cookie      |
-| `/api/auth/logout`   | POST   | —           | `303` to the sign-in page, clears the session cookie         |
+| Route                | Method | Body        | Response                                                                                                                                                                                                     |
+| -------------------- | ------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/api/auth/request`  | POST   | `{ email }` | `202` always — never reveals whether an address is permitted                                                                                                                                                 |
+| `/api/auth/callback` | GET    | `?token`    | `302` to `/login/code`, sets a ten-minute pending cookie; a session is not issued yet                                                                                                                        |
+| `/api/auth/code`     | POST   | `{ code }`  | `200 { status: 'ok' }` sets the session cookie and clears the pending one. `401 { error: 'expired' }` with no valid pending cookie; `401 { error: 'refused' }` on a wrong code or over the per-address limit |
+| `/api/auth/logout`   | POST   | —           | `303` to the sign-in page, clears the session and pending cookies                                                                                                                                            |
+| `/login/enroll`      | GET    | `?token`    | Operator-issued (`npm run enroll:link`), valid 24 hours: the page that shows the authenticator QR                                                                                                            |
 
-The configuration surface additionally requires a password and a time-based one-time code, and
-grants a separate short-lived cookie scoped to `/settings`.
+The second factor is a six-digit TOTP code from an authenticator seeded with the installation's
+one shared `TOTP_SECRET`. There is no configuration surface.
 
 ## Conversations
 

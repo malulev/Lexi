@@ -61,17 +61,20 @@ ops/provision-client.sh acme edit.acme.example 3001
 # Fill in the GitHub App, Netlify, OpenRouter, SMTP and ALLOWED_EMAILS values:
 sudoedit /srv/lexi/acme/.env
 
-# Mint the four secrets and append them AS the client user, so the file stays
+# Mint the three secrets and append them AS the client user, so the file stays
 # 0600 and no value is ever echoed to your terminal. The toolchain runs in a
 # throwaway copy of the checkout so the host needs no Node installed, and so
 # that /opt/lexi/src stays a clean build source.
 docker run --rm -v /opt/lexi/src:/src:ro -w /build node:22-slim \
   sh -c 'cp -a /src/. /build && npm ci --silent \
-         && npm run --silent gen:secrets -- --password "a console password you pick"' \
+         && npm run --silent gen:secrets' \
   | sudo -u acme tee -a /srv/lexi/acme/.env >/dev/null
-# Add CONFIG_TOTP_SECRET to an authenticator app now — read it once with
-# `sudo -u acme grep CONFIG_TOTP_SECRET /srv/lexi/acme/.env`. There is no
-# recovery path; re-running gen:secrets is the recovery path.
+
+# Later, once the stack is up: mint the client's enrollment link and send it
+# to them. It shows the authenticator QR once and works for 24 hours. The
+# secret itself is never printed.
+docker run --rm -v /opt/lexi/src:/src:ro -v /srv/lexi/acme/.env:/secret/.env:ro -w /build node:22-slim \
+  sh -c 'cp -a /src/. /build && cp /secret/.env /build/.env && npm ci --silent && npm run --silent enroll:link'
 
 # Confirm it parses. It prints variable names and never values:
 docker run --rm -v /opt/lexi/src:/src:ro -v /srv/lexi/acme/.env:/secret/.env:ro \
@@ -142,7 +145,7 @@ reported.
 - **`PORT` must never appear in a client `.env`.** That file is both interpolated by Compose and
   passed into the container, where Next reads `PORT` as its listen port — set it there and the
   published mapping stops matching. Use `PORT_HOST`, which `provision-client.sh` fills in.
-- **Backups.** Each client's `.env` and its TOTP secret. That is the entire list; `state/` is a
+- **Backups.** Each client's `.env`, which holds the authenticator secret. That is the entire list; `state/` is a
   cache that rebuilds itself, and everything else lives in GitHub and Netlify.
 - **A client's daemon after a reboot.** `loginctl enable-linger` plus `systemctl --user enable
   docker` is what brings it back with nobody logged in. `provision-client.sh` does both; if a
