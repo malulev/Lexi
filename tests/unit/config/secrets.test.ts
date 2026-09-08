@@ -28,7 +28,7 @@ const SECRET_SHAPED_KEYS = [
   'openrouterApiKey',
   'sessionSecret',
   'configPasswordHash',
-  'configTotpSecret',
+  'totpSecret',
   'smtpPassword',
   'apiKey',
   'password',

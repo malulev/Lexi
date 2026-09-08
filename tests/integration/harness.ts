@@ -54,13 +54,9 @@ const ENV: Env = {
   openrouterApiKey: 'key',
   sessionSecret: 'a'.repeat(32),
   allowedEmails: ['jane@client.example'],
-  // A real argon2id hash of 'fixture-configuration-password' and a base32
-  // secret long enough for TOTP. A fixture that would be rejected as unusable
-  // describes an installation that could not start, which is not what these
-  // tests mean by one.
-  configPasswordHash:
-    '$argon2id$v=19$m=65536,p=4,t=3$WkovnjhviO6+KrGuW0pGPw$aH1PI7KuDMSl14U1diMYqKyzdK6Uz9Vpxne+abvnzPk',
-  configTotpSecret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
+  // A base32 secret long enough for TOTP; a fixture that would be rejected as
+  // unusable describes an installation that could not start.
+  totpSecret: 'JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP',
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'webagent@client.example',
   publicBaseUrl: 'http://localhost:3000',

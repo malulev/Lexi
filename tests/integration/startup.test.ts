@@ -6,9 +6,8 @@
 //
 // The probes are injected: an installation that refuses to serve must be
 // provable without a GitHub App, a Netlify account, or a network.
-import argon2 from 'argon2';
 import { generateSecret } from 'otplib';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createFakeRepoClient } from '@/lib/github/fake';
 import { NotFoundError } from '@/lib/github/types';
@@ -20,11 +19,6 @@ import type { StartupDeps } from '@/lib/config/startup';
 import type { Env } from '@/types';
 
 const TOTP_SECRET = generateSecret();
-let passwordHash: string;
-
-beforeAll(async () => {
-  passwordHash = await argon2.hash('a console password', { type: argon2.argon2id });
-}, 30_000);
 
 function buildEnv(overrides: Partial<Env> = {}): Env {
   return {
@@ -39,8 +33,7 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     openrouterApiKey: 'openrouter-key',
     sessionSecret: 'a'.repeat(32),
     allowedEmails: ['jane@client.example'],
-    configPasswordHash: passwordHash,
-    configTotpSecret: TOTP_SECRET,
+    totpSecret: TOTP_SECRET,
     smtpUrl: 'smtp://localhost:1025',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'http://localhost:3000',
@@ -169,24 +162,14 @@ describe('validateStartup', () => {
     ]);
   });
 
-  it('refuses a configuration password hash that is not an argon2 hash', async () => {
-    const report = await validateStartup(
-      buildDeps({ env: buildEnv({ configPasswordHash: 'my-password' }) }),
-    );
-
-    expect(report.ok).toBe(false);
-    if (report.ok) throw new Error('unreachable');
-    expect(faultFor('CONFIG_PASSWORD_HASH', report.faults)).toMatch(/gen:secrets|argon2/);
-  });
-
   it('refuses a time-based secret an authenticator app could never use', async () => {
     const report = await validateStartup(
-      buildDeps({ env: buildEnv({ configTotpSecret: 'JBSWY3DPEHPK3PXP' }) }),
+      buildDeps({ env: buildEnv({ totpSecret: 'JBSWY3DPEHPK3PXP' }) }),
     );
 
     expect(report.ok).toBe(false);
     if (report.ok) throw new Error('unreachable');
-    expect(faultFor('CONFIG_TOTP_SECRET', report.faults)).toMatch(/base32|gen:secrets/i);
+    expect(faultFor('TOTP_SECRET', report.faults)).toMatch(/base32|gen:secrets/i);
   });
 });
 

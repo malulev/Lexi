@@ -1,4 +1,4 @@
-import { isUsablePasswordHash, isUsableTotpSecret } from '@/lib/auth/config-credential';
+import { isUsableTotpSecret } from '@/lib/auth/config-credential';
 import { createTokenMinter, type TokenMinter } from '@/lib/github/auth';
 import type { RepoClient } from '@/lib/github/types';
 import type { NetlifyClient } from '@/lib/netlify';
@@ -106,34 +106,21 @@ async function checkHostingSite(deps: StartupDeps): Promise<StartupFault | null>
 }
 
 /**
- * The configuration credential is the one setting whose invalidity stays
- * invisible until the day it is needed — which is, by definition, a day
+ * The authenticator secret is the one setting whose invalidity stays
+ * invisible until a client tries to sign in — which is, by definition, a day
  * something else is already wrong. It is checked here for that reason.
  */
-async function checkConfigCredential(env: Env): Promise<StartupFault[]> {
-  const faults: StartupFault[] = [];
-
-  if (!(await isUsablePasswordHash(env.configPasswordHash))) {
-    faults.push({
-      setting: 'CONFIG_PASSWORD_HASH',
+async function checkTotpSecret(env: Env): Promise<StartupFault[]> {
+  if (await isUsableTotpSecret(env.totpSecret)) return [];
+  return [
+    {
+      setting: 'TOTP_SECRET',
       message:
-        'CONFIG_PASSWORD_HASH is not an argon2 hash. It holds the hash of the configuration ' +
-        "password, never the password itself — run `npm run gen:secrets -- --password '<yours>'` " +
-        'and take the line it prints.',
-    });
-  }
-
-  if (!(await isUsableTotpSecret(env.configTotpSecret))) {
-    faults.push({
-      setting: 'CONFIG_TOTP_SECRET',
-      message:
-        'CONFIG_TOTP_SECRET is not a base32 secret of at least 16 bytes, so no authenticator ' +
-        'app could produce a code this installation would accept. Run `npm run gen:secrets` and ' +
+        'TOTP_SECRET is not a base32 secret of at least 16 bytes, so no authenticator app ' +
+        'could produce a code this installation would accept. Run `npm run gen:secrets` and ' +
         'take the line it prints.',
-    });
-  }
-
-  return faults;
+    },
+  ];
 }
 
 /**
@@ -146,7 +133,7 @@ export async function validateStartup(deps: StartupDeps): Promise<StartupReport>
     checkInstallation(deps),
     checkRepository(deps),
     checkHostingSite(deps),
-    checkConfigCredential(deps.env),
+    checkTotpSecret(deps.env),
   ]);
 
   const faults = [installation, repository, hosting, ...credential].filter(

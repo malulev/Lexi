@@ -74,8 +74,9 @@ const rawEnvSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1, 'is required'),
   SESSION_SECRET: z.string().min(32, 'must be at least 32 characters'),
   ALLOWED_EMAILS: z.string().min(1, 'is required').transform(normaliseAllowedEmails),
-  CONFIG_PASSWORD_HASH: z.string().min(1, 'is required'),
-  CONFIG_TOTP_SECRET: z.string().min(1, 'is required'),
+  TOTP_SECRET: z.string().min(1).optional(),
+  /** The old spelling, honoured for one release so a live installation keeps starting. */
+  CONFIG_TOTP_SECRET: z.string().min(1).optional(),
   SMTP_URL: z.string().min(1, 'is required'),
   SMTP_FROM: z.string().min(1, 'is required'),
   PUBLIC_BASE_URL: z.url({ message: 'must be a valid absolute URL' }),
@@ -86,7 +87,14 @@ const rawEnvSchema = z.object({
     .refine((value) => /^\d+$/.test(value), 'must be a whole number')
     .transform(Number)
     .refine((value) => value >= 1 && value <= 16, 'must be between 1 and 16'),
-});
+})
+  // Either spelling satisfies the requirement; the fault is reported under
+  // the name a fresh deployment should use.
+  .superRefine((data, ctx) => {
+    if (!data.TOTP_SECRET && !data.CONFIG_TOTP_SECRET) {
+      ctx.addIssue({ code: 'custom', path: ['TOTP_SECRET'], message: 'is required' });
+    }
+  });
 
 /** One line per fault, each prefixed with the variable it names. */
 function formatAggregatedError(error: z.ZodError): Error {
@@ -111,8 +119,7 @@ function toEnv(data: z.infer<typeof rawEnvSchema>): Env {
     openrouterApiKey: data.OPENROUTER_API_KEY,
     sessionSecret: data.SESSION_SECRET,
     allowedEmails: data.ALLOWED_EMAILS,
-    configPasswordHash: data.CONFIG_PASSWORD_HASH,
-    configTotpSecret: data.CONFIG_TOTP_SECRET,
+    totpSecret: (data.TOTP_SECRET ?? data.CONFIG_TOTP_SECRET)!,
     smtpUrl: data.SMTP_URL,
     smtpFrom: data.SMTP_FROM,
     publicBaseUrl: data.PUBLIC_BASE_URL,

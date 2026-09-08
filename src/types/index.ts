@@ -29,8 +29,8 @@ export interface Env {
   sessionSecret: string;
   /** Lower-cased and de-duplicated. Never sourced from the repository. */
   allowedEmails: string[];
-  configPasswordHash: string;
-  configTotpSecret: string;
+  /** Base32 seed shared by every allowed address: the second factor at sign-in. */
+  totpSecret: string;
   smtpUrl: string;
   smtpFrom: string;
   publicBaseUrl: string;

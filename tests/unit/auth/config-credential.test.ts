@@ -47,8 +47,7 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     openrouterApiKey: 'openrouter-key',
     sessionSecret: 'a'.repeat(32),
     allowedEmails: ['jane@client.example'],
-    configPasswordHash: passwordHash,
-    configTotpSecret: TOTP_SECRET,
+    totpSecret: TOTP_SECRET,
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://client.example',
@@ -160,7 +159,7 @@ describe('verifyConfigCredential', () => {
   });
 
   it('refuses rather than throws when the configured secret is not usable base32', async () => {
-    const env = buildEnv({ configTotpSecret: 'not base32 at all!!!' });
+    const env = buildEnv({ totpSecret: 'not base32 at all!!!' });
 
     const result = await verifyConfigCredential({ password: PASSWORD, code: '123456' }, env, AT);
 

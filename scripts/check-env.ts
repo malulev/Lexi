@@ -80,6 +80,10 @@ function main(): void {
     console.warn(`Defined in both .env and .env.local; .env.local wins: ${shadowed.join(', ')}`);
   }
 
+  if (raw.CONFIG_TOTP_SECRET && !raw.TOTP_SECRET) {
+    console.warn('CONFIG_TOTP_SECRET is the old name; rename it to TOTP_SECRET. It still works this release.');
+  }
+
   const faults: string[] = [];
   const found = Object.keys(raw).sort();
 

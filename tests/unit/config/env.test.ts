@@ -17,8 +17,7 @@ function validRawEnv(): NodeJS.ProcessEnv {
     OPENROUTER_API_KEY: 'openrouter-key',
     SESSION_SECRET: 'a'.repeat(32),
     ALLOWED_EMAILS: 'Jane@Client.example, marketing@client.example',
-    CONFIG_PASSWORD_HASH: 'argon2id$hash',
-    CONFIG_TOTP_SECRET: 'BASE32SECRET',
+    TOTP_SECRET: 'BASE32SECRET',
     SMTP_URL: 'smtps://user:pass@smtp.example.com:465',
     SMTP_FROM: 'webagent@client.example',
     PUBLIC_BASE_URL: 'https://client.example',
@@ -54,8 +53,6 @@ describe('parseEnv', () => {
     'OPENROUTER_API_KEY',
     'SESSION_SECRET',
     'ALLOWED_EMAILS',
-    'CONFIG_PASSWORD_HASH',
-    'CONFIG_TOTP_SECRET',
     'SMTP_URL',
     'SMTP_FROM',
     'PUBLIC_BASE_URL',
@@ -64,6 +61,38 @@ describe('parseEnv', () => {
     delete raw[key];
 
     expect(() => parseEnv(raw)).toThrow();
+  });
+
+  it('reads TOTP_SECRET into totpSecret', () => {
+    expect(parseEnv(validRawEnv()).totpSecret).toBe('BASE32SECRET');
+  });
+
+  it('still accepts CONFIG_TOTP_SECRET as a fallback for one release', () => {
+    const raw = validRawEnv();
+    delete raw.TOTP_SECRET;
+    raw.CONFIG_TOTP_SECRET = 'OLDNAME';
+
+    expect(parseEnv(raw).totpSecret).toBe('OLDNAME');
+  });
+
+  it('prefers TOTP_SECRET when both names are set', () => {
+    const raw = validRawEnv();
+    raw.CONFIG_TOTP_SECRET = 'OLDNAME';
+
+    expect(parseEnv(raw).totpSecret).toBe('BASE32SECRET');
+  });
+
+  it('requires one of the two names, and names the new one', () => {
+    const raw = validRawEnv();
+    delete raw.TOTP_SECRET;
+
+    expect(() => parseEnv(raw)).toThrow(/TOTP_SECRET/);
+  });
+
+  it('no longer knows CONFIG_PASSWORD_HASH', () => {
+    const env = parseEnv({ ...validRawEnv(), CONFIG_PASSWORD_HASH: 'anything' });
+
+    expect(env).not.toHaveProperty('configPasswordHash');
   });
 
   it('rejects a GITHUB_REPO with no slash', () => {
