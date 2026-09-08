@@ -14,3 +14,6 @@ playwright-report/
 
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# business plan, not source (public repo)
+LAUNCH-PLAN.md

@@ -1,0 +1,86 @@
+# Everything that can be proved without a GitHub App, a Netlify account, or a
+# socket. The end-to-end suite is deliberately absent: it drives a real
+# installation and spends real money on a model, so it stays a thing a human
+# runs on purpose (`npm run test:e2e`), not a thing every push pays for.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, types, tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      # Route handlers against recorded fixtures; no call leaves the process
+      # (tests/setup/integration.ts). Serial by config, so give it room.
+      - name: Integration tests
+        run: npm run test:int
+
+      # Deployment configuration is read at startup, not at build time, so
+      # this needs no environment. If it ever starts needing one, that is a
+      # regression in instrumentation.ts, and this step is where it surfaces.
+      - name: Build
+        run: npm run build
+
+  agent-image:
+    name: agent image builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # No request can run without this image, so a Dockerfile that stopped
+      # building is a broken product even when every test is green.
+      - name: Build the agent image
+        run: docker build -t webagent/agent:ci agent/
+
+      # The absence of git in this image is the security boundary, not a
+      # policy (agent/Dockerfile). Prove the absence rather than trusting the
+      # comment: a base-image bump that started shipping git would otherwise
+      # be invisible.
+      - name: Assert the agent image has no git
+        run: |
+          if docker run --rm --entrypoint sh webagent/agent:ci -c 'command -v git'; then
+            echo "::error::git is present in the agent image; the structural guarantee is gone"
+            exit 1
+          fi
+          echo "no git in the agent image, as intended"
+
+      # It must also not run as root: /work and /control are bind mounts, and
+      # a root agent writes host files owned by root.
+      - name: Assert the agent image does not run as root
+        run: |
+          uid="$(docker run --rm --entrypoint sh webagent/agent:ci -c 'id -u')"
+          test "$uid" = "10001" || {
+            echo "::error::agent image runs as uid $uid, expected 10001"
+            exit 1
+          }
+          echo "agent runs as uid $uid"
