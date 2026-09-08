@@ -16,3 +16,12 @@ export {
 export type { SessionInspection } from '@/lib/auth/session';
 export { authorizeSession } from '@/lib/auth/authorize';
 export type { AuthResult } from '@/lib/auth/authorize';
+export {
+  PENDING_COOKIE,
+  PENDING_TTL_MS,
+  issuePending,
+  pendingCookieOptions,
+  verifyPending,
+} from '@/lib/auth/pending';
+export { otpauthUri, verifyTotpCode } from '@/lib/auth/totp';
+export { ENROLL_TTL_MS, enrollmentUrl, issueEnrollToken, verifyEnrollToken } from '@/lib/auth/enroll';
