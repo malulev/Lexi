@@ -17,10 +17,11 @@ set -euo pipefail
 #   6. release.sh --client     build once, deliver, start, wait
 #   7. Caddy                   one site block, validate, reload
 #   8. status.sh + HTTPS       proves the whole path answers
+#   9. enroll:link             the 24-hour link that shows the client their authenticator QR
 #
-# Two things are deliberately interactive: the console password (never on the
-# command line, never in shell history) and the one-time display of the TOTP
-# secret, which has no recovery path and must reach an authenticator app now.
+# One step is interactive: the .env editor, for the credentials only a person
+# knows. Everything else is derived. No secret value is ever printed; the
+# enrollment link carries a signed token, not the secret.
 
 usage() {
   cat <<'USAGE'
@@ -276,7 +277,7 @@ choose_port() {
 # ---------------------------------------------------------------------------
 
 step_provision() {
-  step "1/8 provision ${SLUG}"
+  step "1/9 provision ${SLUG}"
   local force=()
   if id -u "$SLUG" >/dev/null 2>&1 || [ -d "${CLIENT_ROOT}/${SLUG}" ]; then
     force=(--force)
@@ -347,7 +348,7 @@ open_editor() {
 }
 
 step_fill_env() {
-  step "2/8 fill in ${SLUG}'s .env"
+  step "2/9 fill in ${SLUG}'s .env"
   local env_file missing
   env_file="$(env_file_path)"
   [ -f "$env_file" ] || die "${env_file} does not exist; provisioning should have written it"
@@ -375,9 +376,7 @@ step_fill_env() {
 # The node toolchain runs in a throwaway container from a read-only copy of the
 # checkout, so the host needs no Node and the build source stays clean. First
 # argument: the shell command to run after `npm ci`; the rest: extra options
-# for `docker run` (mounts, environment). A password crosses into the container
-# as an environment variable, never as an argument: arguments are visible in
-# `ps` on the host and in shell history.
+# for `docker run` (mounts, environment).
 node_in_container() {
   local script="$1"
   shift
@@ -385,71 +384,29 @@ node_in_container() {
     sh -c "cp -a /src/. /build && npm ci --silent && ${script}"
 }
 
-read_console_password() {
-  [ -t 0 ] || die "no terminal to read the console password from. Run interactively for this step."
-  local first second
-  while :; do
-    read -rs -p "Console password for /settings (not echoed): " first
-    echo
-    read -rs -p "Again: " second
-    echo
-    [ -n "$first" ] || { echo "Empty. Try again."; continue; }
-    [ "$first" = "$second" ] || { echo "They differ. Try again."; continue; }
-    CONSOLE_PASSWORD="$first"
-    return 0
-  done
-}
-
 step_secrets() {
-  step "3/8 mint secrets"
+  step "3/9 mint secrets"
   local env_file
   env_file="$(env_file_path)"
-  if [ -n "$(read_env_value "$env_file" CONFIG_TOTP_SECRET)" ]; then
-    note "secrets already present (CONFIG_TOTP_SECRET is set); not minting again"
+  if [ -n "$(read_env_value "$env_file" TOTP_SECRET)" ] ||
+    [ -n "$(read_env_value "$env_file" CONFIG_TOTP_SECRET)" ]; then
+    note "secrets already present (TOTP_SECRET is set); not minting again"
     return 0
   fi
 
-  read_console_password
   local out
   # Captured, then appended as the client user, so the file stays 0600 and no
   # line of it passes through the terminal.
-  out="$(CONSOLE_PASSWORD="$CONSOLE_PASSWORD" node_in_container \
-    'npm run --silent gen:secrets -- --password "$CONSOLE_PASSWORD"' -e CONSOLE_PASSWORD)" ||
+  out="$(node_in_container 'npm run --silent gen:secrets')" ||
     die "gen:secrets failed; see the output above"
-  unset CONSOLE_PASSWORD
   [ -n "$out" ] || die "gen:secrets produced nothing"
-  # gen:secrets escapes `$` as `\$` for Next's dotenv reader, which is what a
-  # local `npm run dev` wants. This file is read by Docker Compose instead,
-  # which escapes a literal `$` as `$$` and would expand `$argon2id`, `$v`,
-  # `$m` in the hash to nothing — the container then refuses to serve with
-  # "CONFIG_PASSWORD_HASH is not an argon2 hash".
-  out="$(printf '%s\n' "$out" | sed '/^CONFIG_PASSWORD_HASH=/ s/\\\$/$$/g')"
   printf '\n%s\n' "$out" | runuser -u "$SLUG" -- tee -a "$env_file" >/dev/null
   chmod 0600 "$env_file"
-  note "appended SESSION_SECRET, NETLIFY_WEBHOOK_SECRET, CONFIG_PASSWORD_HASH, CONFIG_TOTP_SECRET"
-
-  echo
-  echo "CONFIG_TOTP_SECRET is the second factor on /settings. There is no recovery path:"
-  echo "if it is lost, the only fix is to mint all four secrets again."
-  if [ -t 0 ]; then
-    read -r -p "Show it once now, to add to an authenticator app? [y/N] " answer
-    case "$answer" in
-      y | Y)
-        echo
-        echo "  CONFIG_TOTP_SECRET = $(read_env_value "$env_file" CONFIG_TOTP_SECRET)"
-        echo
-        read -r -p "Added to the authenticator? Press Enter to continue and clear the screen. " _
-        clear 2>/dev/null || true
-        ;;
-      *)
-        echo "Read it later, once, with: sudo -u ${SLUG} grep CONFIG_TOTP_SECRET ${env_file}"
-        ;;
-    esac
-  fi
+  note "appended SESSION_SECRET, NETLIFY_WEBHOOK_SECRET, TOTP_SECRET"
 }
 
 step_check_env() {
-  step "4/8 check:env"
+  step "4/9 check:env"
   local env_file
   env_file="$(env_file_path)"
   node_in_container 'cp /secret/.env /build/.env && npm run --silent check:env' \
@@ -471,7 +428,7 @@ resolved_ips() {
 }
 
 step_dns() {
-  step "5/8 DNS for ${HOSTNAME_ARG}"
+  step "5/9 DNS for ${HOSTNAME_ARG}"
   if [ "$SKIP_DNS" -eq 1 ]; then
     note "skipped (--skip-dns)"
     return 0
@@ -515,7 +472,7 @@ step_dns() {
 }
 
 step_release() {
-  step "6/8 release ${SLUG}"
+  step "6/9 release ${SLUG}"
   "${SCRIPT_DIR}/release.sh" --client "$SLUG" --registry-port "$REGISTRY_PORT" ||
     die "release failed for ${SLUG}. See: ops/status.sh ${SLUG} --logs"
 }
@@ -529,7 +486,7 @@ EOF
 }
 
 step_proxy() {
-  step "7/8 reverse proxy"
+  step "7/9 reverse proxy"
   if [ "$NO_PROXY" -eq 1 ]; then
     note "not touching ${CADDYFILE} (--no-proxy). Add this block yourself:"
     caddy_block
@@ -575,7 +532,7 @@ wait_for_https() {
 }
 
 step_verify() {
-  step "8/8 verify"
+  step "8/9 verify"
   "${SCRIPT_DIR}/status.sh" "$SLUG"
   if [ "$NO_PROXY" -eq 1 ] || [ "$SKIP_DNS" -eq 1 ]; then
     note "HTTPS check skipped (proxy or DNS step was skipped)"
@@ -587,6 +544,24 @@ step_verify() {
   else
     die "https://${HOSTNAME_ARG}/ did not answer within 120s. Certificate issuance can lag a fresh DNS record; check: journalctl -u caddy -n 50"
   fi
+}
+
+# The client enrols their authenticator through this link. It is the only
+# place the secret is shown, it carries a signed token rather than the secret
+# itself, and it stops working after 24 hours. Run `npm run enroll:link` in
+# the node container for a fresh one.
+step_enrollment_link() {
+  step "9/9 enrollment link"
+  local env_file link
+  env_file="$(env_file_path)"
+  link="$(node_in_container 'cp /secret/.env /build/.env && npm run --silent enroll:link' \
+    -v "${env_file}:/secret/.env:ro")" || {
+    note "could not mint an enrollment link now; see ops/README.md for the command to run later"
+    return 0
+  }
+  echo
+  echo "Send this to the client. It shows their authenticator QR once and works for 24 hours:"
+  echo "  ${link}"
 }
 
 print_done() {
@@ -607,9 +582,9 @@ Prove it end to end:
   1. Open the URL, request a sign-in link with an address in ALLOWED_EMAILS, receive the email.
   2. Send a small change. A preview should appear within a few minutes.
   3. Press Publish, then Undo.
-  4. Open /settings with the console password and the TOTP code.
+  4. Sign in again from another browser: the link, then the code from the authenticator.
 
-Back up ${CLIENT_ROOT}/${SLUG}/.env and the TOTP secret. Nothing else.
+Back up ${CLIENT_ROOT}/${SLUG}/.env. Nothing else; the authenticator seed is in it.
 EOF
 }
 
@@ -627,6 +602,7 @@ main() {
   step_release
   step_proxy
   step_verify
+  step_enrollment_link
   print_done
 }
 

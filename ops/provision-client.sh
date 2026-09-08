@@ -367,8 +367,8 @@ ALLOWED_EMAILS=
 
 # --- Minted by gen:secrets, never chosen by hand ----------------------------
 # Append them; do not type them:
-#   npm run gen:secrets -- --password '<console password>' >> ${env_file}
-# SESSION_SECRET, NETLIFY_WEBHOOK_SECRET, CONFIG_PASSWORD_HASH, CONFIG_TOTP_SECRET
+#   npm run gen:secrets >> ${env_file}
+# SESSION_SECRET, NETLIFY_WEBHOOK_SECRET, TOTP_SECRET
 EOF
 
   chown "${SLUG}:${SLUG}" "$env_file"
@@ -388,17 +388,13 @@ Remaining steps, in this order:
        sudoedit ${dir}/.env
      (GitHub App, Netlify, OpenRouter, SMTP, ALLOWED_EMAILS.)
 
-  2. Mint the four secrets and append them AS ${SLUG}, so the file stays 0600
+  2. Mint the three secrets and append them AS ${SLUG}, so the file stays 0600
      and no value is ever echoed to your terminal. The toolchain runs in a
      throwaway copy of the checkout, because node_modules in ${REPO_ROOT}
      would be baked into every client's image by the next release:
        docker run --rm -v ${REPO_ROOT}:/src:ro -w /build node:22-slim \\
-         sh -c 'cp -a /src/. /build && npm ci --silent \\
-                && npm run --silent gen:secrets -- --password "<console password>"' \\
+         sh -c 'cp -a /src/. /build && npm ci --silent && npm run --silent gen:secrets' \\
          | sudo -u ${SLUG} tee -a ${dir}/.env >/dev/null
-     Add CONFIG_TOTP_SECRET to an authenticator app immediately — read it once
-     with: sudo -u ${SLUG} grep CONFIG_TOTP_SECRET ${dir}/.env
-     There is no recovery path; re-running gen:secrets is the recovery path.
 
   3. Check it parses. It prints variable names and never values:
        docker run --rm -v ${REPO_ROOT}:/src:ro -v ${dir}/.env:/secret/.env:ro \\
@@ -414,6 +410,10 @@ Remaining steps, in this order:
            reverse_proxy 127.0.0.1:${PORT}
        }
      then: systemctl reload caddy
+
+  6. Send the client their authenticator link (shows the QR once, valid 24 h):
+       docker run --rm -v ${REPO_ROOT}:/src:ro -v ${dir}/.env:/secret/.env:ro -w /build node:22-slim \\
+         sh -c 'cp -a /src/. /build && cp /secret/.env /build/.env && npm ci --silent && npm run --silent enroll:link'
 EOF
 }
 
