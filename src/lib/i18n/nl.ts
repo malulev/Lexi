@@ -276,5 +276,18 @@ export const nl: Dictionary = {
     demoClient: 'Maak de kop op de homepage korter en de knop donkerblauw.',
     demoAgent:
       'Gedaan. De kop is nu vier woorden en de knop is donkerblauw. Je voorbeeld staat klaar.',
+    codeTitle: 'Voer je code in',
+    codeHint: 'Open je authenticator-app en typ de zescijferige code voor deze website.',
+    codeLabel: 'Zescijferige code',
+    codeSubmit: 'Doorgaan',
+    codeChecking: 'Controleren…',
+    codeRefused: 'Die code is niet geaccepteerd. Probeer de volgende die je app toont.',
+    codeExpired: 'Deze aanmeldlink is verlopen. Vraag een nieuwe aan.',
+    enrollTitle: 'Stel je authenticator in',
+    enrollHint:
+      'Scan dit met Google Authenticator, 1Password, Authy of een andere authenticator-app. Bij elke aanmelding typ je de zescijferige code.',
+    enrollKey: 'Of voer deze sleutel handmatig in:',
+    enrollDone: 'Klaar. Aanmelden',
+    enrollExpired: 'Deze installatielink is verlopen. Vraag je ontwikkelaar om een nieuwe.',
   },
 };

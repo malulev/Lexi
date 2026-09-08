@@ -2098,3 +2098,39 @@
   color: var(--faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
+
+/* The code step and the enrollment page: one card, centred, no pitch beside it. */
+.login--narrow {
+  grid-template-columns: 1fr;
+  place-items: center;
+}
+
+.login__input--code {
+  font-size: 1.6rem;
+  letter-spacing: 0.4em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.enroll__qr {
+  width: min(260px, 70vw);
+  height: auto;
+  margin: 1rem auto;
+  display: block;
+  background: #fff;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.enroll__qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.enroll__key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+  user-select: all;
+  text-align: center;
+}

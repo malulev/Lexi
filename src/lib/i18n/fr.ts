@@ -284,5 +284,19 @@ export const fr: Dictionary = {
     demoClient: 'Raccourcir le titre de la page d’accueil et mettre le bouton en bleu foncé.',
     demoAgent:
       'C’est fait. Le titre fait quatre mots et le bouton est bleu marine. Votre aperçu est prêt.',
+    codeTitle: 'Saisissez votre code',
+    codeHint:
+      'Ouvrez votre application d’authentification et saisissez le code à six chiffres de ce site.',
+    codeLabel: 'Code à six chiffres',
+    codeSubmit: 'Continuer',
+    codeChecking: 'Vérification…',
+    codeRefused: 'Ce code n’a pas été accepté. Essayez le suivant affiché par votre application.',
+    codeExpired: 'Ce lien de connexion a expiré. Demandez-en un nouveau.',
+    enrollTitle: 'Configurez votre application d’authentification',
+    enrollHint:
+      'Scannez ceci avec Google Authenticator, 1Password, Authy ou toute application d’authentification. Vous saisirez son code à six chiffres à chaque connexion.',
+    enrollKey: 'Ou saisissez cette clé à la main :',
+    enrollDone: 'Terminé. Se connecter',
+    enrollExpired: 'Ce lien de configuration a expiré. Demandez-en un nouveau à votre développeur.',
   },
 };

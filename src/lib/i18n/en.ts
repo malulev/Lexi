@@ -246,5 +246,18 @@ export const en: Dictionary = {
     demoClient: 'Make the homepage headline shorter and the button dark blue.',
     demoAgent:
       'Done. The headline is four words now and the button is navy. Your preview is ready.',
+    codeTitle: 'Enter your code',
+    codeHint: 'Open your authenticator app and type the six-digit code for this website.',
+    codeLabel: 'Six-digit code',
+    codeSubmit: 'Continue',
+    codeChecking: 'Checking…',
+    codeRefused: 'That code was not accepted. Try the next one your app shows.',
+    codeExpired: 'That sign-in link has expired. Request a new one.',
+    enrollTitle: 'Set up your authenticator',
+    enrollHint:
+      'Scan this with Google Authenticator, 1Password, Authy or any authenticator app. You will type its six-digit code each time you sign in.',
+    enrollKey: 'Or enter this key by hand:',
+    enrollDone: 'Done. Sign in',
+    enrollExpired: 'This setup link has expired. Ask your developer for a new one.',
   },
 };

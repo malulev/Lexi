@@ -164,5 +164,19 @@ export interface Dictionary {
     couldNotReach: string;
     demoClient: string;
     demoAgent: string;
+    /** The code step, after the email link. */
+    codeTitle: string;
+    codeHint: string;
+    codeLabel: string;
+    codeSubmit: string;
+    codeChecking: string;
+    codeRefused: string;
+    codeExpired: string;
+    /** The one-time enrollment page behind the operator's link. */
+    enrollTitle: string;
+    enrollHint: string;
+    enrollKey: string;
+    enrollDone: string;
+    enrollExpired: string;
   };
 }

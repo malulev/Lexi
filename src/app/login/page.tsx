@@ -22,7 +22,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    // The callback and the code page send an expired link here with
+    // `?error=expired`; say so once, where the client is about to try again.
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('error') === 'expired'
+      ? t.login.codeExpired
+      : null,
+  );
 
   async function submit(event: FormEvent) {
     event.preventDefault();
