@@ -1,4 +1,4 @@
-import { isUsableTotpSecret } from '@/lib/auth/config-credential';
+import { isUsableTotpSecret } from '@/lib/auth/totp';
 import { createTokenMinter, type TokenMinter } from '@/lib/github/auth';
 import type { RepoClient } from '@/lib/github/types';
 import type { NetlifyClient } from '@/lib/netlify';
