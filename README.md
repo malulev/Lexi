@@ -2,6 +2,8 @@
 
 *Say what you want changed. See it before it goes live.*
 
+![Lexi demo: describe a change, preview it, then publish to the live site](docs/lexi-demo-edit-deploy.gif)
+
 ![Lexi architecture: browser, app, isolated agent container, GitHub, Netlify](docs/architecture.svg)
 
 In a hurry? [Quickstart](docs/QUICKSTART.md) has only the commands, and the
@@ -10,7 +12,6 @@ In a hurry? [Quickstart](docs/QUICKSTART.md) has only the commands, and the
 A client describes a change to their website in plain language. An agent makes it on a branch, a
 preview is built, and the client presses one button to publish. Nothing reaches the live site
 without a person approving it.
-
 **One installation serves one website.** No site selector, no tenant column — install it once per
 client site, the way you would install a self-hosted CMS. There is no database: published state,
 pending changes, conversation history and the audit trail live in GitHub and Netlify.
