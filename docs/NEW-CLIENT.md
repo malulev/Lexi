@@ -22,6 +22,9 @@ and `3001` with the client's slug, hostname and a port no other client on the bo
 - [ ] `AGENTS.md` at the repo root, from `docs/AGENTS.example.md`.
 - [ ] If pages carry a third-party `<script src>` in `<head>`, move it behind a same-origin loader
       or new pages will be refused by `forbidExternalCode`.
+- [ ] The preview pane frames deploy previews, so the site must allow `https://edit.<client>` in
+      `Content-Security-Policy: frame-ancestors` and must not send `X-Frame-Options` (it cannot
+      name a second origin). Otherwise the pane shows "refused to connect".
 
 ## On the VPS
 
