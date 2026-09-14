@@ -8,6 +8,7 @@
  * process.
  */
 
+import { describe, log } from '@/lib/log';
 import { isNotFoundError, isRefAlreadyExistsError, type RepoClient } from '@/lib/github/types';
 
 export const LOCK_REF = 'refs/webagent/lock';
@@ -92,7 +93,7 @@ async function releaseRef(client: RepoClient, ref: string): Promise<void> {
     // expected case; anything else is logged so a genuine transport fault is
     // not silently invisible.
     if (!isNotFoundError(error)) {
-      console.error('lock release failed; ref may remain held', { ref, error });
+      log.error('lock.release_failed', { ref, error: describe(error) });
     }
   }
 }

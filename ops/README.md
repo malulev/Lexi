@@ -25,6 +25,22 @@ exactly why there is no TLS to configure, and exactly why it must never be reach
 A root-owned reverse proxy (Caddy) terminates TLS and forwards to each client's own
 loopback-only port.
 
+## Monitoring
+
+Nothing here watches itself by default. [MONITORING.md](MONITORING.md) turns
+that on in three phases, cheapest first — the dead-man's switch alone takes a
+host from no coverage to "someone learns within 20 minutes", for no memory and
+no account beyond a free heartbeat check.
+
+```bash
+ops/install-monitoring.sh              # timers, log caps, journald caps
+ops/install-monitoring.sh --with-alloy # once Grafana Cloud credentials exist
+ops/status.sh --prom                   # what the collector reads
+ops/status.sh --json                   # the same facts, for a script
+ops/status.sh --quiet                  # exit status only, for a timer
+```
+
+
 ## The scripts
 
 | Script | Run as | When |

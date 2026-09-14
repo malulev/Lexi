@@ -5,6 +5,7 @@ import { authorizeSession, SESSION_COOKIE } from '@/lib/auth';
 import { getInstallation } from '@/lib/installation';
 import { errorBody, ERROR_STATUS } from '@/lib/jobs/messages';
 import type { ErrorCode, Session } from '@/types';
+import { describe, log } from '@/lib/log';
 
 /**
  * The one place a request is authorized (constitution Principle VI).
@@ -42,6 +43,10 @@ export function fail(code: ErrorCode): NextResponse {
  * is logged with its context and never returned (Principle I).
  */
 export function failUnexpectedly(context: string, cause: unknown): NextResponse {
-  console.error(`[webagent] ${context}`, cause);
+  // `cause` is never handed to the logger as an object. This is the catch-all
+  // behind every route, so whatever an upstream library chose to hang off its
+  // error would be serialised here — request headers, connection options — and
+  // these lines are shipped off the box. The message, and nothing else.
+  log.error('http.unexpected', { context, error: describe(cause) });
   return fail('internal_error');
 }

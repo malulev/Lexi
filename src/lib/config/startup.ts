@@ -180,7 +180,7 @@ export async function assertStartupValid(deps?: StartupDeps): Promise<void> {
  * an App that cannot mint here cannot mint for a job either; only the cache is
  * unshared, which costs one extra exchange at boot.
  */
-async function buildStartupDeps(): Promise<StartupDeps> {
+export async function buildStartupDeps(): Promise<StartupDeps> {
   const { loadEnv } = await import('./env');
   const { createRepoClient } = await import('@/lib/github/client');
   const { createNetlifyClient } = await import('@/lib/netlify');

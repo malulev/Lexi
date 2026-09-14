@@ -49,15 +49,23 @@ describe('countRunningAgents', () => {
   });
 
   it('counts zero, and says so in the log, when the daemon cannot be asked', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const written: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
     const docker = {
       listContainers: (async () => {
         throw new Error('connect ENOENT /var/run/docker.sock');
       }) as Docker['listContainers'],
     };
     expect(await countRunningAgents(docker)).toBe(0);
-    expect(error).toHaveBeenCalledOnce();
-    error.mockRestore();
+    // Not merely 'something was logged': the event name is what an alert
+    // rule matches on, and a silent cap is the precondition for the host
+    // running out of memory.
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0] as string).event).toBe('slots.count_failed');
+    stdout.mockRestore();
   });
 });
 
@@ -65,7 +73,7 @@ describe('createDockerSlots', () => {
   it('returns at once when fewer agents run than the limit, without announcing a wait', async () => {
     const onWait = vi.fn();
     const slots = createDockerSlots({ docker: daemonReporting([1]), limit: 2, ...clock() });
-    expect(await slots.acquire({ onWait })).toEqual({ ok: true });
+    expect(await slots.acquire({ onWait })).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(onWait).not.toHaveBeenCalled();
   });
 
@@ -82,7 +90,7 @@ describe('createDockerSlots', () => {
       random: () => 0.5,
     });
 
-    expect(await slots.acquire({ onWait })).toEqual({ ok: true });
+    expect(await slots.acquire({ onWait })).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(onWait).toHaveBeenCalledOnce();
     expect(sleep).toHaveBeenCalledTimes(2);
     expect(sleep).toHaveBeenCalledWith(3_000);
@@ -106,7 +114,7 @@ describe('createDockerSlots', () => {
   it('treats the limit as exclusive: a limit of one waits behind one running agent', async () => {
     const onWait = vi.fn();
     const slots = createDockerSlots({ docker: daemonReporting([1, 0]), limit: 1, ...clock() });
-    expect(await slots.acquire({ onWait })).toEqual({ ok: true });
+    expect(await slots.acquire({ onWait })).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(onWait).toHaveBeenCalledOnce();
   });
 
@@ -121,7 +129,7 @@ describe('createDockerSlots', () => {
       sleep: sleepLow,
       random: () => 0,
     });
-    expect(await lowSlots.acquire()).toEqual({ ok: true });
+    expect(await lowSlots.acquire()).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(sleepLow).toHaveBeenCalledWith(2_250);
 
     const highTime = clock();
@@ -134,7 +142,7 @@ describe('createDockerSlots', () => {
       sleep: sleepHigh,
       random: () => 1,
     });
-    expect(await highSlots.acquire()).toEqual({ ok: true });
+    expect(await highSlots.acquire()).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(sleepHigh).toHaveBeenCalledWith(3_750);
   });
 });
@@ -142,7 +150,7 @@ describe('createDockerSlots', () => {
 describe('UNLIMITED_SLOTS', () => {
   it('never waits', async () => {
     const onWait = vi.fn();
-    expect(await UNLIMITED_SLOTS.acquire({ onWait })).toEqual({ ok: true });
+    expect(await UNLIMITED_SLOTS.acquire({ onWait })).toEqual({ ok: true, waitedMs: expect.any(Number) });
     expect(onWait).not.toHaveBeenCalled();
   });
 });

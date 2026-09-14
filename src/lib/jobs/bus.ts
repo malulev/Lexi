@@ -19,6 +19,7 @@
  */
 
 import type { JobEvent, RequestAnnouncement } from '@/types';
+import { describe, log } from '@/lib/log';
 
 export interface JobBus {
   publish(event: JobEvent): void;
@@ -57,7 +58,7 @@ function notifyListener<T extends { requestId: string }>(listener: (event: T) =>
   } catch (error) {
     // A subscriber's own bug (e.g. writing to an already-closed response)
     // must not take down the publisher or starve sibling subscribers.
-    console.error('job bus listener threw', { requestId: event.requestId, error });
+    log.error('bus.listener_threw', { requestId: event.requestId, error: describe(error) });
   }
 }
 
