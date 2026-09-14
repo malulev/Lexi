@@ -85,6 +85,16 @@ describe('log', () => {
 });
 
 describe('redaction', () => {
+  it('keeps token counts, which the credential heuristic would otherwise eat', () => {
+    // `tokensIn` matches /token/ and is a measurement, not a secret. Found in
+    // production as "tokensIn":"[redacted]" — the metric silently emptied.
+    log.info('request.ended', { tokensIn: 8123, tokensOut: 412, costUsd: 0.04 });
+
+    const line = lastLine();
+    expect(line.tokensIn).toBe(8123);
+    expect(line.tokensOut).toBe(412);
+  });
+
   it('blanks a field whose name reads as a credential, whatever it holds', () => {
     log.error('http.unexpected', { sessionSecret: 'anything at all', apiKey: 'x', ok: 'kept' });
 

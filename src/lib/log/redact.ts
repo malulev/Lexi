@@ -82,9 +82,25 @@ export function redactValue(value: string): string {
   return out;
 }
 
+/**
+ * Field names the key heuristic gets wrong.
+ *
+ * `SECRET_SHAPED_KEY` exists to catch a credential committed under a plausible
+ * name, and it is deliberately broad. `tokensIn` and `tokensOut` are model
+ * token *counts* — the numbers every spend and usage metric is built from —
+ * and they match it on the substring `token`. Redacting them does not protect
+ * anything and silently empties the measurement, which is how this was found:
+ * a production log line reading `"tokensIn":"[redacted]"`.
+ *
+ * An explicit list rather than a cleverer regex: these are names this codebase
+ * chooses and can enumerate, and the next person to add one should have to
+ * think about it here.
+ */
+const NEVER_SECRET = new Set(['tokensIn', 'tokensOut']);
+
 /** Blanks a field whose *name* reads as a credential, and scrubs the rest. */
 export function redactField(key: string, value: unknown): unknown {
-  if (SECRET_SHAPED_KEY.test(key)) return REDACTED;
+  if (!NEVER_SECRET.has(key) && SECRET_SHAPED_KEY.test(key)) return REDACTED;
   if (typeof value === 'string') return redactValue(value);
   if (Array.isArray(value)) {
     return value.map((entry) => (typeof entry === 'string' ? redactValue(entry) : entry));
