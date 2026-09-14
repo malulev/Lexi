@@ -58,6 +58,16 @@ prometheus.scrape "host" {
 }
 
 prometheus.remote_write "grafana" {
+  // One Grafana Cloud stack usually serves more than one project — the free
+  // tier allows exactly one. `lexi_*` is already a unique prefix, but
+  // `node_cpu_seconds_total` from this host is indistinguishable from the same
+  // metric shipped by anything else you own. This stamps every series, so a
+  // query, a dashboard variable or an alert rule can always say which project
+  // it means.
+  external_labels = {
+    project = "lexi",
+  }
+
   endpoint {
     url = sys.env("GRAFANA_PROM_URL")
     basic_auth {
@@ -79,8 +89,13 @@ prometheus.remote_write "grafana" {
 
 // --- application logs ------------------------------------------------------
 //
-// Alloy runs as root, so it reads each client's container logs straight off
-// disk. Deliberately NOT via discovery.docker against every
+// Alloy is made to run as root by the systemd drop-in install-monitoring.sh
+// writes, so it can read each client's container logs straight off disk —
+// client homes are 0750 and the packaged `alloy` user cannot traverse them.
+// If these paths ever come back empty while metrics still flow, that is the
+// first thing to check.
+//
+// Deliberately NOT via discovery.docker against every
 // /run/user/<uid>/docker.sock: pointing one root process at every client's
 // daemon socket rebuilds exactly the blast radius that one-rootless-daemon-
 // per-user exists to remove.
@@ -142,6 +157,12 @@ loki.process "lexi" {
   stage.labels {
     values = { level = "level", event = "event" }
   }
+
+  // Same reason as external_labels on the metrics side: one stack, several
+  // projects.
+  stage.static_labels {
+    values = { project = "lexi" }
+  }
   stage.timestamp {
     source = "ts"
     format = "RFC3339"
@@ -165,7 +186,10 @@ loki.write "grafana" {
 // application code at all.
 loki.source.journal "host" {
   forward_to = [loki.write.grafana.receiver]
-  labels     = { job = "systemd" }
+  // Namespaced deliberately: a bare job="systemd" collides with every other
+  // host that ships a journal to the same stack, and the two sets are
+  // indistinguishable once mixed.
+  labels     = { job = "lexi-host", project = "lexi" }
   relabel_rules = loki.relabel.journal.rules
   max_age    = "12h"
 }

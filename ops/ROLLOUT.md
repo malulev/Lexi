@@ -347,7 +347,7 @@ source at the top left.
 {job="lexi", event="request.ended"} | json          # every finished request
 {job="lexi", event="request.ended"} | json | outcome="failed"
 {job="lexi", event="slot.waited"} | json            # capacity pressure
-{job="systemd", unit="caddy.service"}               # HTTP access logs
+{job="lexi-host", unit="caddy.service"}             # HTTP access logs
 ```
 
 Click any line to expand the parsed fields — `costUsd`, `durationMs`,
@@ -359,8 +359,8 @@ Click any line to expand the parsed fields — `costUsd`, `durationMs`,
 lexi_client_app_up                                  # 1 or 0 per client
 lexi_client_ready_ok                                # credentials still valid
 lexi_agents_limit_total                             # summed concurrency ceiling
-node_memory_MemAvailable_bytes                      # against the line above
-node_filesystem_avail_bytes{mountpoint="/"}
+node_memory_MemAvailable_bytes{project="lexi"}      # against the line above
+node_filesystem_avail_bytes{project="lexi",mountpoint="/"}
 lexi_client_info                                    # deployed image and commit
 ```
 

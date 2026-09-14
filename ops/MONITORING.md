@@ -102,8 +102,11 @@ queries. The short version:
 
 ## Constraints worth knowing before you extend it
 
-- **Label discipline.** Only `job`, `slug`, `unit`, `level`, `event`, `stream`
-  may be labels. `requestId`, `conversationNumber`, `commitSha` are unbounded
+- **Label discipline.** Only `project`, `job`, `slug`, `unit`, `level`, `event`
+  and `stream` may be labels. `project="lexi"` is stamped on every metric
+  (`external_labels`) and every log line, so one Grafana Cloud stack — the free
+  tier allows exactly one — can hold several projects without `node_*` metrics
+  or journald logs from different hosts mixing together. `requestId`, `conversationNumber`, `commitSha` are unbounded
   and stay as JSON fields, which in Loki cost nothing at query time. One
   mistake here burns the free-tier series allowance in a day.
 - **Agent output never leaves the box.** The container log glob matches agent

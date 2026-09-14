@@ -113,11 +113,23 @@ if [ "$WITH_ALLOY" -eq 1 ]; then
 
   install -d -m 755 /etc/systemd/system/alloy.service.d
   cat >/etc/systemd/system/alloy.service.d/lexi.conf <<'OVERRIDE'
-# Bounded rather than hoped for. This box has no swap and its summed agent
-# ceiling already exceeds free memory, so the monitoring must not be the thing
-# that tips it: MemoryMax makes Alloy the process the kernel kills, instead of
-# Caddy or a client's app.
+# Bounded rather than hoped for. The summed agent ceiling across clients can
+# exceed free memory, so the monitoring must not be the thing that tips it:
+# MemoryMax makes Alloy the process the kernel kills, instead of Caddy or a
+# client's app.
+#
+# `User=root` is deliberate and is the one real privilege decision here. Each
+# client's home is 0750 <slug>:<slug>, and its rootless Docker data-root sits
+# inside it, so the packaged `alloy` user cannot traverse to the container
+# logs. It would not fail loudly — `loki.source.file` would simply match no
+# files, metrics would keep flowing, and the application logs that every
+# request metric is derived from would silently never arrive. A collector that
+# reads several users' logs needs privilege over all of them; the alternative
+# is adding `alloy` to every client's group, which must then be repeated on
+# every provision and is forgotten exactly once.
 [Service]
+User=root
+Group=root
 EnvironmentFile=-/etc/lexi/monitoring.env
 Environment=GOMEMLIMIT=120MiB
 MemoryHigh=150M
@@ -130,6 +142,10 @@ OVERRIDE
   systemctl enable --now alloy
   note "alloy installed and started"
   note "check it: systemctl status alloy; journalctl -u alloy -n 30"
+  note "then CONFIRM LOGS ARRIVE: in Grafana, {job=\"lexi\"} must return lines."
+  note "  metrics flowing while logs stay empty means Alloy cannot read the"
+  note "  client container logs — check it is running as root."
+
 fi
 
 echo
