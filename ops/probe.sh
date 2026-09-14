@@ -30,7 +30,8 @@ every client is healthy. Run as root, from a systemd timer.
   --textfile-dir <dir>   Default: /var/lib/node_exporter/textfile
 
 Environment:
-  HEARTBEAT_URL  Dead-man's-switch ping URL. Kept in /etc/lexi/monitoring.env,
+  HEARTBEAT_URL  Dead-man's-switch ping URL. Only the run without --full pings,
+                 so stopping the 60s timer is enough to make the check go red. Kept in /etc/lexi/monitoring.env,
                  0600 root — never in a client .env, because a client user can
                  read their own and this token is host-wide.
 USAGE
@@ -79,11 +80,18 @@ chmod 644 "$tmp"
 mv -- "$tmp" "${TEXTFILE_DIR}/lexi.prom"
 trap - EXIT
 
-# The heartbeat is conditional, and that condition is the entire point. A
-# timer that pings unconditionally proves only that the timer runs; making the
-# ping depend on every client being healthy is what turns an outside service
-# into a monitor of this host rather than of cron.
-if [ -n "$HEARTBEAT_URL" ]; then
+# The heartbeat is conditional twice over, and both conditions matter.
+#
+# It depends on every client being healthy: a timer that pings unconditionally
+# proves only that the timer runs, not that the thing it watches is well.
+#
+# And only the 60-second run pings, never `--full`. Both timers call this
+# script, so if the slow one pinged too it would keep the check green while the
+# fast collection was dead — which is precisely the failure a dead-man's switch
+# exists to catch, masked by the switch itself.
+if [ "$FULL" -eq 1 ]; then
+  : # the attribution run; the fast timer owns the heartbeat
+elif [ -n "$HEARTBEAT_URL" ]; then
   if "${SCRIPT_DIR}/status.sh" --quiet; then
     curl -fsS -m 10 --retry 3 "$HEARTBEAT_URL" >/dev/null || echo "probe: heartbeat ping failed" >&2
   else

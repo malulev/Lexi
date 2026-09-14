@@ -14,17 +14,24 @@ dies*. Do this even if you do nothing else.
 
 1. Create a check at a heartbeat service (healthchecks.io free, or similar):
    period **15 minutes**, grace **15 minutes**. Copy its ping URL.
-2. On the host, as root:
+2. On the host, as root. `ops/bootstrap-host.sh` already runs the installer on
+   a fresh host, so on one of those only the last two lines are needed:
 
    ```bash
-   /opt/prosel/src/ops/install-monitoring.sh
-   $EDITOR /etc/lexi/monitoring.env      # paste HEARTBEAT_URL
+   /opt/prosel/src/ops/install-monitoring.sh   # idempotent; skip if bootstrap ran it
+   $EDITOR /etc/lexi/monitoring.env            # paste HEARTBEAT_URL
    systemctl restart lexi-probe.timer
    ```
 
 3. Prove it: `systemctl stop lexi-probe.timer`, wait for the grace to expire,
-   and confirm the email arrives. **An alert never tested is an alert that does
-   not exist.**
+   confirm the email arrives, then **`systemctl start lexi-probe.timer`**.
+   **An alert never tested is an alert that does not exist.**
+
+   The test only means something once `HEARTBEAT_URL` is filled in *and* the
+   check has already received at least one ping — an empty URL makes `probe.sh`
+   skip the ping entirely, so there is nothing to go silent. Only the 60-second
+   run pings; `lexi-probe-full.timer` deliberately does not, so stopping the one
+   timer is enough.
 
 The ping is conditional — `ops/probe.sh` only pings when `ops/status.sh
 --quiet` says every client is healthy. A timer that pings unconditionally
@@ -105,9 +112,11 @@ queries. The short version:
   relax that filter.
 - **`errorDetail` is not in `request.ended`** for the same reason. The durable
   record in the pull request keeps it, where the client controls access.
-- **Alloy is capped** at `MemoryMax=200M` by a systemd drop-in. This box has no
-  swap and its summed agent ceiling already exceeds free memory; the cap makes
+- **Alloy is capped** at `MemoryMax=200M` by a systemd drop-in. The summed agent
+  ceiling across clients can exceed free memory by design, so the cap makes
   Alloy the process the kernel kills rather than Caddy or a client's app.
+  `ops/bootstrap-host.sh` also creates a swapfile, which turns an overshoot into
+  slowness instead of a kill — check `swapon --show` on an older host.
 - **Secrets** live in `/etc/lexi/monitoring.env`, 0600 root — never in a client
   `.env`, because a client user can read their own and these tokens are
   host-wide authority.
