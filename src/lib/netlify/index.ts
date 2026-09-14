@@ -6,7 +6,7 @@
 
 export type { Deploy, DeployState, DeployContext } from './types';
 export type { NetlifyClient } from './client';
-export { createNetlifyClient } from './client';
+export { createNetlifyClient, isNetlifyPlanLimit, NetlifyApiError } from './client';
 // The fake is deliberately not re-exported here. This barrel is imported by
 // startup validation, so anything named in it is reachable from the deployed
 // bundle — and a test double is not something to ship. Tests import

@@ -241,6 +241,14 @@ export const nl: Dictionary = {
       'Je website is veranderd sinds dit live ging, dus terugdraaien zou die nieuwere wijzigingen ook meenemen.',
     site_conflict:
       'Je website is op dezelfde plek veranderd als deze wijziging. Begin een nieuw gesprek en vraag het opnieuw.',
+    model_quota:
+      'De AI-dienst heeft het dagelijkse tegoed van deze site opgebruikt. Probeer het morgen opnieuw. Er is niets gepubliceerd.',
+    model_credit:
+      'De AI-dienst van deze site heeft geen krediet meer. Je ontwikkelaar moet het aanvullen. Er is niets gepubliceerd.',
+    model_unavailable:
+      'De AI-dienst antwoordt nu even niet. Probeer het straks opnieuw. Er is niets gepubliceerd.',
+    hosting_limit:
+      'De hosting van je website zit aan de limiet van het abonnement, dus er kan nu niets worden gebouwd. Vraag je ontwikkelaar.',
     internal_error: 'Er ging iets mis aan mijn kant. Er is niets gepubliceerd.',
   },
   attachmentRefusals: {

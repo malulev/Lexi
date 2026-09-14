@@ -1,5 +1,6 @@
 import type { JobBus } from '@/lib/jobs/bus';
-import type { NetlifyClient } from '@/lib/netlify';
+import { describe } from '@/lib/log';
+import { isNetlifyPlanLimit, type NetlifyClient } from '@/lib/netlify';
 import type { Deploy } from '@/lib/netlify/types';
 import { deployEffect } from '@/lib/netlify/webhook';
 
@@ -16,6 +17,7 @@ import { deployEffect } from '@/lib/netlify/webhook';
 export type PreviewOutcome =
   | { kind: 'ready'; previewUrl: string }
   | { kind: 'build_failed'; detail: string }
+  | { kind: 'hosting_limit'; detail: string }
   | { kind: 'timed_out' };
 
 export interface WaitForPreviewInput {
@@ -45,7 +47,15 @@ export async function waitForPreview(
   const deadline = now() + input.timeoutMs;
 
   while (now() < deadline) {
-    const deploy = await findDeploy(deps.netlify, input);
+    let deploy: Deploy | null;
+    try {
+      deploy = await findDeploy(deps.netlify, input);
+    } catch (cause) {
+      // 402 is Netlify saying the plan is out, which is an ending the client
+      // can be told about. Anything else is still a fault for the caller.
+      if (!isNetlifyPlanLimit(cause)) throw cause;
+      return { kind: 'hosting_limit', detail: describe(cause) };
+    }
     const outcome = deploy ? interpret(deploy) : null;
     if (outcome) return outcome;
 
@@ -74,6 +84,7 @@ function interpret(deploy: Deploy): PreviewOutcome | null {
   const effect = deployEffect(deploy);
   if (effect.kind === 'preview_ready') return { kind: 'ready', previewUrl: effect.previewUrl };
   if (effect.kind === 'build_failed') return { kind: 'build_failed', detail: effect.detail };
+  if (effect.kind === 'hosting_limit') return { kind: 'hosting_limit', detail: effect.detail };
   return null;
 }
 

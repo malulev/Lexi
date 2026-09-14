@@ -96,4 +96,8 @@ a path, or a build log:
 | `cost_ceiling`      | That request was larger than this site's limit allows                                                           |
 | `out_of_date`       | Your website changed while this was being saved. Try again in a moment                                          |
 | `site_conflict`     | Your website changed in the same place as this one. Start a new conversation and ask for it again               |
+| `model_quota`       | The AI service has used up today's allowance for this site. Try again tomorrow. Nothing was published          |
+| `model_credit`      | The AI service for this site has run out of credit. Your developer needs to top it up. Nothing was published    |
+| `model_unavailable` | The AI service isn't answering right now. Try again in a little while. Nothing was published                   |
+| `hosting_limit`     | Your website's hosting has reached its plan limit, so nothing can be built right now. Ask your developer        |
 | `nothing_to_change` | Nothing needed changing for that                                                                                |

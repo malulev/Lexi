@@ -35,6 +35,7 @@ worse than no rule because it looks like coverage.
 | A11 | Client refused outright | `count_over_time({job="lexi", event="request.ended"} | json | errorCode="too_busy" [15m]) > 0` | instant | A client asked and was turned away by capacity. The visible face of A5. |
 | A12 | Auth burst | `count_over_time({job="lexi", event="auth.refused"}[10m]) > 50` | instant | Credential stuffing against the six-digit code. |
 | A13 | Readiness degraded | `lexi_client_ready_ok == 0` | 10m | The app serves but cannot reach GitHub or Netlify — an expired credential, invisible until now. |
+| A14 | Provider limit | `count_over_time({job="lexi", event="request.ended"} \| json \| errorCode=~"model_quota\|model_credit\|hosting_limit" [15m]) > 0` | instant | The model quota, the model account, or the hosting plan is out. Every request on that client ends the same way until a person tops something up. The client is told so and `alertContact` is mailed, but SMTP is not monitoring. `provider.failed` carries the provider's own sentence; `request.failed` carries a stack for anything still landing in `internal_error`. |
 
 ## Tier B — daily digest, one email
 

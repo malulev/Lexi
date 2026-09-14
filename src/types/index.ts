@@ -165,6 +165,11 @@ export type ErrorCode =
   | 'nothing_to_undo'
   | 'site_moved_on'
   | 'site_conflict'
+  // The provider said no, and said why. See jobs/provider-failure.ts.
+  | 'model_quota'
+  | 'model_credit'
+  | 'model_unavailable'
+  | 'hosting_limit'
   | 'internal_error';
 
 export interface StageEvent {
@@ -298,6 +303,8 @@ export interface AgentResult {
   tokensIn: number;
   tokensOut: number;
   costUsd: number;
+  /** The last error the model provider returned, when the run ended on one. */
+  providerError?: { statusCode: number; message: string };
 }
 
 // ---------------------------------------------------------------------------

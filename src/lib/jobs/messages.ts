@@ -30,6 +30,14 @@ export const CLIENT_MESSAGES: Record<ErrorCode, string> = {
     'Your website has changed since this went live, so undoing it now would take those newer changes with it.',
   site_conflict:
     'Your website changed in the same place as this one. Start a new conversation and ask for it again.',
+  model_quota:
+    "The AI service has used up today's allowance for this site. Try again tomorrow. Nothing was published.",
+  model_credit:
+    'The AI service for this site has run out of credit. Your developer needs to top it up. Nothing was published.',
+  model_unavailable:
+    "The AI service isn't answering right now. Try again in a little while. Nothing was published.",
+  hosting_limit:
+    "Your website's hosting has reached its plan limit, so nothing can be built right now. Ask your developer.",
   internal_error: 'Something went wrong on my side. Nothing was published.',
 };
 
@@ -124,6 +132,10 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   nothing_to_undo: 409,
   site_moved_on: 409,
   site_conflict: 409,
+  model_quota: 503,
+  model_credit: 402,
+  model_unavailable: 503,
+  hosting_limit: 402,
   internal_error: 500,
 };
 

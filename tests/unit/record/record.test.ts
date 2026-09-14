@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { RequestRecord } from '@/types';
+import type { ErrorCode, RequestRecord } from '@/types';
+import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
 import { hasNotified, parseComment, renderRecord, withNotified } from '@/lib/record';
 
 /**
@@ -28,7 +29,10 @@ const baseRecord: RequestRecord = {
   previewUrl: 'https://deploy-preview-42--client.netlify.app',
 };
 
-function comment(body: string, overrides: Partial<{ id: number; author: string; createdAt: string }> = {}) {
+function comment(
+  body: string,
+  overrides: Partial<{ id: number; author: string; createdAt: string }> = {},
+) {
   return {
     id: overrides.id ?? 1,
     author: overrides.author ?? 'webagent-bot',
@@ -51,7 +55,9 @@ describe('renderRecord then parseComment', () => {
   it('carries the comment envelope fields through untouched', () => {
     const rendered = renderRecord('Done.', baseRecord);
 
-    const parsed = parseComment(comment(rendered, { id: 42, author: 'someone', createdAt: '2026-09-02T10:00:00Z' }));
+    const parsed = parseComment(
+      comment(rendered, { id: 42, author: 'someone', createdAt: '2026-09-02T10:00:00Z' }),
+    );
 
     expect(parsed.commentId).toBe(42);
     expect(parsed.author).toBe('someone');
@@ -78,7 +84,7 @@ describe('renderRecord then parseComment', () => {
 
 describe('parseComment on a comment with no marker', () => {
   it('parses the whole body as prose, with no record', () => {
-    const body = "Looks good, thanks! Can you also make the footer smaller?";
+    const body = 'Looks good, thanks! Can you also make the footer smaller?';
 
     const parsed = parseComment(comment(body));
 
@@ -114,7 +120,10 @@ describe('parseComment degrades an unparseable block to prose rather than throwi
   });
 
   it('degrades when the JSON is well-formed but fails schema validation', () => {
-    const body = renderRecord('Done.', baseRecord).replace('"outcome": "succeeded"', '"outcome": "sideways"');
+    const body = renderRecord('Done.', baseRecord).replace(
+      '"outcome": "succeeded"',
+      '"outcome": "sideways"',
+    );
 
     const parsed = parseComment(comment(body));
 
@@ -225,5 +234,23 @@ describe('hasNotified / withNotified (OD-004 idempotency)', () => {
     const twice = withNotified(once, 'preview_ready');
 
     expect(twice.notified).toEqual(['preview_ready']);
+  });
+});
+
+describe('every failure code the product can write reads back as a record', () => {
+  // The record's own code list once trailed the vocabulary by four codes, and
+  // every failed record written with one of them read back as prose with no
+  // block at all — a silent loss the client-side audit could not see.
+  it('round-trips a failed record for each code in the client vocabulary', () => {
+    for (const code of Object.keys(CLIENT_MESSAGES) as ErrorCode[]) {
+      const failed: RequestRecord = {
+        ...baseRecord,
+        outcome: 'failed',
+        errorCode: code,
+        errorDetail: `detail for ${code}`,
+      };
+      const parsed = parseComment(comment(renderRecord(CLIENT_MESSAGES[code], failed)));
+      expect(parsed.record?.errorCode, code).toBe(code);
+    }
   });
 });

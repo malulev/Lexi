@@ -53,6 +53,22 @@ export function describe(cause: unknown): string {
   return String(cause);
 }
 
+/** Longer than any real trace; short enough that one line cannot fill a log file. */
+const STACK_MAX_CHARS = 4_000;
+
+/**
+ * An error's stack, bounded, for the one line that reports a fault nobody
+ * expected. `describe` gives the message at every level so a line stays
+ * readable; this is the companion field for when the message alone does not
+ * say where. Still never the object (see `describe`).
+ */
+export function stackOf(cause: unknown): string | undefined {
+  if (!(cause instanceof Error) || !cause.stack) return undefined;
+  return cause.stack.length > STACK_MAX_CHARS
+    ? `${cause.stack.slice(0, STACK_MAX_CHARS - 1)}…`
+    : cause.stack;
+}
+
 function emit(level: LogLevel, event: LogEvent, fields: LogFields): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[configuredLevel()]) return;
 

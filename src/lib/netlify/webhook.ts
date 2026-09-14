@@ -6,6 +6,7 @@
  * reading the request body and the shared secret.
  */
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { classifyHostingMessage } from '@/lib/jobs/provider-failure';
 import type { Deploy } from './types';
 import { rawDeploySchema, toDeploy } from './types';
 
@@ -19,6 +20,8 @@ export interface Correlation {
 export type DeployEffect =
   | { kind: 'preview_ready'; previewUrl: string }
   | { kind: 'build_failed'; detail: string }
+  // The plan, not the code, stopped the build: minutes, credits, billing.
+  | { kind: 'hosting_limit'; detail: string }
   | { kind: 'ignore' };
 
 function base64urlDecode(segment: string): Buffer {
@@ -157,7 +160,7 @@ export function deployEffect(deploy: Deploy): DeployEffect {
 
   if (deploy.state === 'error') {
     return {
-      kind: 'build_failed',
+      kind: classifyHostingMessage(deploy.errorMessage),
       detail: deploy.errorMessage ?? 'The build failed for an unspecified reason.',
     };
   }

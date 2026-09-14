@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { describe as describeError, initLogRedaction, log, resetLogRedaction } from '@/lib/log';
+import {
+  describe as describeError,
+  initLogRedaction,
+  log,
+  resetLogRedaction,
+  stackOf,
+} from '@/lib/log';
 import type { Env } from '@/types';
 
 /**
@@ -8,7 +14,8 @@ import type { Env } from '@/types';
  * this box. Everything here is about what must *not* come out.
  */
 
-const PRIVATE_KEY = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----';
+const PRIVATE_KEY =
+  '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----';
 const NETLIFY_TOKEN = 'nfp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const OPENROUTER_KEY = 'sk-or-v1-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const SESSION_SECRET = 'session-secret-that-is-long-enough-to-register';
@@ -162,5 +169,25 @@ describe('describe', () => {
   it('survives something that is not an Error at all', () => {
     expect(describeError('plain string')).toBe('plain string');
     expect(describeError(undefined)).toBe('undefined');
+  });
+});
+
+describe('stackOf', () => {
+  it('returns the stack of an Error, bounded, so a failure line can be traced', () => {
+    const stack = stackOf(new Error('boom'));
+    expect(stack).toContain('Error: boom');
+    expect(stack).toContain('at ');
+  });
+
+  it('caps a runaway stack rather than emitting an unbounded line', () => {
+    const error = new Error('boom');
+    error.stack = `Error: boom\n${'    at deep (file.ts:1:1)\n'.repeat(500)}`;
+    expect(stackOf(error)!.length).toBeLessThanOrEqual(4_000);
+  });
+
+  it('is undefined for anything that is not an Error', () => {
+    expect(stackOf('a string')).toBeUndefined();
+    expect(stackOf({ stack: 'not an error' })).toBeUndefined();
+    expect(stackOf(undefined)).toBeUndefined();
   });
 });

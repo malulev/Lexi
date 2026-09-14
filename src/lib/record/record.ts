@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
 import type {
   ErrorCode,
   NotificationEvent,
@@ -59,18 +60,11 @@ const VIOLATION_VALUES: PolicyViolation[] = [
   'external_code',
 ];
 
-const ERROR_CODE_VALUES: ErrorCode[] = [
-  'blocked_by_policy',
-  'request_in_flight',
-  'too_busy',
-  'agent_timeout',
-  'build_failed',
-  'site_unreachable',
-  'cost_ceiling',
-  'out_of_date',
-  'nothing_to_change',
-  'internal_error',
-];
+// Derived, not listed: a list here fell four codes behind the vocabulary
+// unnoticed, and every failed record written with one of those read back as
+// prose with no record at all. The message table is the one place a code
+// must be added to reach a client, so it is the one place this reads from.
+const ERROR_CODE_VALUES = Object.keys(CLIENT_MESSAGES) as [ErrorCode, ...ErrorCode[]];
 
 const NOTIFICATION_EVENT_VALUES: NotificationEvent[] = [
   'preview_ready',

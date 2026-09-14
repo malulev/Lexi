@@ -250,6 +250,14 @@ export const fr: Dictionary = {
       'Votre site a changé depuis cette mise en ligne ; annuler maintenant emporterait aussi ces modifications plus récentes.',
     site_conflict:
       'Votre site a changé au même endroit que cette modification. Commencez une nouvelle conversation et redemandez-la.',
+    model_quota:
+      'Le service d’IA a épuisé son quota du jour pour ce site. Réessayez demain. Rien n’a été publié.',
+    model_credit:
+      'Le service d’IA de ce site n’a plus de crédit. Votre développeur doit le recharger. Rien n’a été publié.',
+    model_unavailable:
+      'Le service d’IA ne répond pas pour le moment. Réessayez dans un petit moment. Rien n’a été publié.',
+    hosting_limit:
+      'L’hébergement de votre site a atteint la limite de son offre ; rien ne peut être construit. Voyez votre développeur.',
     internal_error: 'Quelque chose s’est mal passé de mon côté. Rien n’a été publié.',
   },
   attachmentRefusals: {

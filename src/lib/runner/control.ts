@@ -29,6 +29,10 @@ const agentResultSchema = z
     tokensIn: z.number(),
     tokensOut: z.number(),
     costUsd: z.number(),
+    providerError: z
+      .object({ statusCode: z.number().int(), message: z.string().max(2_000) })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -73,7 +77,11 @@ export function assertControlDirOutsideWorkDir(controlDir: string, workDir: stri
  * place in `runner/` where the contract as written and the guarantee it
  * demands could not both be satisfied literally; the guarantee wins.
  */
-export async function writeControlDir(controlDir: string, workDir: string, prompt: AgentPrompt): Promise<void> {
+export async function writeControlDir(
+  controlDir: string,
+  workDir: string,
+  prompt: AgentPrompt,
+): Promise<void> {
   assertControlDirOutsideWorkDir(controlDir, workDir);
   await mkdir(controlDir, { recursive: true });
   await writeFile(join(controlDir, PROMPT_FILE_NAME), JSON.stringify(prompt, null, 2), 'utf8');

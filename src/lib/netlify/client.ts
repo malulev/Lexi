@@ -33,6 +33,25 @@ function authHeaders(token: string): HeadersInit {
   return { Authorization: `Bearer ${token}`, Accept: 'application/json' };
 }
 
+/**
+ * A Netlify answer that was not the one asked for, carrying its HTTP status
+ * so a caller can tell "the plan ran out" (402) from "Netlify is down"
+ * without parsing the sentence written for a developer.
+ */
+export class NetlifyApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'NetlifyApiError';
+  }
+}
+
+export function isNetlifyPlanLimit(cause: unknown): boolean {
+  return cause instanceof NetlifyApiError && cause.status === 402;
+}
+
 /** Names the site in every failure — a bare fetch error names nothing a developer can act on. */
 function describeFailure(siteId: string, situation: string, status: number): string {
   return `Netlify site "${siteId}" ${situation} (HTTP ${status}).`;
@@ -48,8 +67,9 @@ export function createNetlifyClient(env: Env, deps?: { fetch?: typeof fetch }): 
     });
 
     if (!response.ok) {
-      throw new Error(
+      throw new NetlifyApiError(
         describeFailure(siteId, 'could not be reached while listing deploys', response.status),
+        response.status,
       );
     }
 
@@ -80,21 +100,26 @@ export function createNetlifyClient(env: Env, deps?: { fetch?: typeof fetch }): 
     });
 
     if (response.status === 404) {
-      throw new Error(
+      throw new NetlifyApiError(
         describeFailure(siteId, 'was not found — check NETLIFY_SITE_ID', response.status),
+        response.status,
       );
     }
     if (response.status === 401 || response.status === 403) {
-      throw new Error(
+      throw new NetlifyApiError(
         describeFailure(
           siteId,
           'rejected the configured credential — check NETLIFY_TOKEN',
           response.status,
         ),
+        response.status,
       );
     }
     if (!response.ok) {
-      throw new Error(describeFailure(siteId, 'is unreachable', response.status));
+      throw new NetlifyApiError(
+        describeFailure(siteId, 'is unreachable', response.status),
+        response.status,
+      );
     }
 
     const body: unknown = await response.json();

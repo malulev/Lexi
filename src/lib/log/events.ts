@@ -25,6 +25,12 @@ export type LogEvent =
   | 'readiness.probed'
   // Faults that are handled but worth counting.
   | 'agent.run_failed'
+  // A request or a publication ended on a fault nobody expected: message and
+  // stack, so `docker logs` says where. The counted line is `request.ended`.
+  | 'request.failed'
+  | 'publication.failed'
+  // The model or hosting provider refused and said why (status, message).
+  | 'provider.failed'
   // The agent's own last words, on a line the collector drops before shipping
   // (ops/monitoring/alloy/config.alloy). Read it with `docker logs`; it never
   // reaches the external log service.

@@ -90,7 +90,10 @@ async function expectFailureReads(
   const parsed = parseComment((await harnessed.client.listComments(conversationNumber)).at(-1)!);
   expect(parsed.record?.outcome).toBe('failed');
   expect(parsed.record?.errorCode).toBe(code);
-  expect(parsed.record?.errorDetail, 'a failed record must explain itself to a developer').toBeTruthy();
+  expect(
+    parsed.record?.errorDetail,
+    'a failed record must explain itself to a developer',
+  ).toBeTruthy();
   expect(parsed.prose).toBe(CLIENT_MESSAGES[code]);
   expect(await readPushedFile(harnessed.originDir, 'main', 'src/index.html')).toContain('Hello');
 }
@@ -139,9 +142,9 @@ describe('hosting that never answers', () => {
     await expectFailureReads(harness, pullRequest.number, 'site_unreachable');
     // The change did reach the conversation's branch; only the preview is
     // missing, and the public site is untouched either way.
-    expect(await readPushedFile(harness.originDir, pullRequest.headRef, 'src/index.html')).toContain(
-      'Built for speed',
-    );
+    expect(
+      await readPushedFile(harness.originDir, pullRequest.headRef, 'src/index.html'),
+    ).toContain('Built for speed');
   });
 });
 
@@ -255,12 +258,124 @@ describe('an agent whose container dies mid-edit', () => {
     const failed = lines.find((line) => line.event === 'agent.run_failed');
     const detail = lines.find((line) => line.event === 'agent.run_failed_detail');
     expect(failed, 'the counted failure line').toBeTruthy();
-    expect(failed?.errorDetail, 'the counted line ships off the box and must stay small').toBeUndefined();
+    expect(
+      failed?.errorDetail,
+      'the counted line ships off the box and must stay small',
+    ).toBeUndefined();
     expect(detail, 'a separate line the collector drops').toBeTruthy();
     expect(detail?.requestId).toBe(failed?.requestId);
     expect(detail?.errorCode).toBe('internal_error');
     expect(detail?.errorDetail).toContain('exited with status 1');
     expect(detail?.errorDetail).toContain('opencode: model refused: quota');
+  });
+});
+
+describe('a model provider that refuses', () => {
+  const quotaRefusal = {
+    statusCode: 429,
+    message:
+      'Rate limit exceeded: free-models-per-day. Add 5 credits to unlock 1000 free model requests per day',
+  };
+
+  it('names the daily allowance to the client, mails the developer, and logs the provider', async () => {
+    harness = await createHarness({
+      script: {
+        exitCode: 1,
+        output: ['{"type":"error","error":{"name":"APIError","data":{"statusCode":429}}}'],
+        result: {
+          summary: 'The agent exited with an error before reporting a summary.',
+          filesChanged: [],
+          tokensIn: 0,
+          tokensOut: 0,
+          costUsd: 0,
+          providerError: quotaRefusal,
+        },
+      },
+    });
+    const pullRequest = await openConversation(harness.client);
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    let outcome: Awaited<ReturnType<typeof sendRequest>>;
+    try {
+      outcome = await sendRequest(harness, pullRequest.number, pullRequest.headRef);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(outcome.started && outcome.outcome).toBe('failed');
+    await expectFailureReads(harness, pullRequest.number, 'model_quota');
+    expect(await branchExists(harness.originDir, pullRequest.headRef)).toBe(false);
+
+    const alert = harness.mailer.sent.find((mail) => mail.subject.includes('allowance'));
+    expect(alert, 'the developer is told, in figures').toBeTruthy();
+    expect(alert?.text).toContain('free-models-per-day');
+
+    const lines = written.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const provider = lines.find((line) => line.event === 'provider.failed');
+    expect(provider?.statusCode).toBe(429);
+    expect(provider?.message).toContain('free-models-per-day');
+    const ended = lines.find((line) => line.event === 'request.ended');
+    expect(ended?.errorCode).toBe('model_quota');
+  });
+
+  it('reads an empty account as credit and a rejected key as unavailable', async () => {
+    for (const [statusCode, code] of [
+      [402, 'model_credit'],
+      [401, 'model_unavailable'],
+    ] as const) {
+      harness = await createHarness({
+        script: {
+          exitCode: 1,
+          result: {
+            summary: '',
+            filesChanged: [],
+            tokensIn: 0,
+            tokensOut: 0,
+            costUsd: 0,
+            providerError: { statusCode, message: 'refused' },
+          },
+        },
+      });
+      const pullRequest = await openConversation(harness.client);
+      await sendRequest(harness, pullRequest.number, pullRequest.headRef);
+      await expectFailureReads(harness, pullRequest.number, code);
+      await harness.cleanup();
+      harness = null;
+    }
+  });
+});
+
+describe('a fault nobody expected', () => {
+  it('logs its message and stack on request.failed so the server log says where', async () => {
+    harness = await createHarness({ script: editsTheHomepage() });
+    const pullRequest = await openConversation(harness.client);
+    harness.deps.netlify.findDeployByPullRequest = async () => {
+      throw new Error('deploy list exploded');
+    };
+    harness.deps.netlify.findDeployByCommit = async () => {
+      throw new Error('deploy list exploded');
+    };
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    try {
+      await sendRequest(harness, pullRequest.number, pullRequest.headRef);
+    } finally {
+      spy.mockRestore();
+    }
+
+    await expectFailureReads(harness, pullRequest.number, 'internal_error');
+    const lines = written.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const failed = lines.find((line) => line.event === 'request.failed');
+    expect(failed?.error).toBe('deploy list exploded');
+    expect(String(failed?.stack)).toMatch(/^Error: deploy list exploded\n\s+at /);
   });
 });
 

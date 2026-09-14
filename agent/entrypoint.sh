@@ -134,7 +134,23 @@ let tokensIn = 0;
 let tokensOut = 0;
 let costUsd = 0;
 let summary = '';
+let providerError;
 const filesChanged = new Set();
+
+/**
+ * A provider refusal, as opencode reports it:
+ *   { "type": "error", "error": { "name": "APIError", "data": { "statusCode": 429, "message": "..." } } }
+ * (seen live against OpenRouter, 2026-09-14). It sits at the top level, with
+ * no `part`, so it is read before the `part` check below. Only a numeric
+ * status counts: a refusal the host can classify needs one.
+ */
+function providerErrorOf(event) {
+  if (event.type !== 'error') return undefined;
+  const data = event.error?.data;
+  if (typeof data?.statusCode !== 'number') return undefined;
+  const message = typeof data.message === 'string' ? data.message : String(event.error?.name ?? 'error');
+  return { statusCode: data.statusCode, message: message.slice(0, 2000) };
+}
 
 for (const line of lines) {
   let event;
@@ -144,6 +160,10 @@ for (const line of lines) {
     continue; // --format json does not guarantee every line is a JSON object
   }
   if (typeof event !== 'object' || event === null) continue;
+
+  // The last refusal wins: opencode retries a retryable error, and the final
+  // one is the one the run actually died on.
+  providerError = providerErrorOf(event) ?? providerError;
 
   const part = event.part;
   if (typeof part !== 'object' || part === null) continue;
@@ -176,10 +196,11 @@ if (!summary) {
     : 'The agent exited with an error before reporting a summary.';
 }
 
-await writeFile(
-  process.env.RESULT_FILE,
-  JSON.stringify({ summary, filesChanged: [...filesChanged], tokensIn, tokensOut, costUsd }, null, 2),
-);
+// Only a failed run reports the provider: an error that was retried and then
+// succeeded is not why the run ended.
+const result = { summary, filesChanged: [...filesChanged], tokensIn, tokensOut, costUsd };
+if (exitCode !== 0 && providerError) result.providerError = providerError;
+await writeFile(process.env.RESULT_FILE, JSON.stringify(result, null, 2));
 NODE
 
 # However this goes, `exit "$OPENCODE_EXIT"` below must still run: opencode's

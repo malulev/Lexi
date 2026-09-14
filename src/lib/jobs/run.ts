@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { RepoClient } from '@/lib/github/types';
-import { log } from '@/lib/log';
+import { describe, log, stackOf } from '@/lib/log';
 import { alertOperator } from '@/lib/notify/operator';
+import { classifyModelFailure } from '@/lib/jobs/provider-failure';
 import { stageDurations } from '@/lib/record/durations';
 import {
   discardAttachments,
@@ -207,6 +208,9 @@ async function execute(
     machine.advance('running');
     const agent = await runAgent(deps, requestId, prepared, model);
     if (agent.failure) {
+      if (isProviderLimit(agent.failure.errorCode)) {
+        await alertProviderLimit(deps, input, agent.failure.errorCode, agent.failure.errorDetail);
+      }
       // The spend is carried into every ending, not just the successful one:
       // a request that failed cost exactly what it cost, and a record omitting
       // that under-reports the installation precisely where a developer is
@@ -249,6 +253,9 @@ async function execute(
       },
     );
 
+    if (preview.kind === 'hosting_limit') {
+      await alertProviderLimit(deps, input, 'hosting_limit', preview.detail);
+    }
     return finish(
       deps,
       input,
@@ -256,6 +263,14 @@ async function execute(
       settle(preview, { requestId, startedAt, agent, verdict, commit, model }),
     );
   } catch (cause) {
+    // The one line that says where an unexpected fault came from. The counted
+    // `request.ended` names only the code; this carries the message and stack.
+    log.error('request.failed', {
+      requestId,
+      conversationNumber: input.conversationNumber,
+      error: describe(cause),
+      stack: stackOf(cause),
+    });
     if (!machine.isTerminal()) machine.advance('failed');
     return finish(deps, input, machine, {
       requestId,
@@ -452,7 +467,23 @@ async function runAgent(
   // behind. Reading their absence as "nothing needed changing" is worse still
   // — it reports a crash as a considered decision.
   if (run.exitCode !== null && run.exitCode !== 0) {
-    return failed('internal_error', `the agent container exited with status ${run.exitCode}`);
+    const providerError = result?.providerError;
+    const base = `the agent container exited with status ${run.exitCode}`;
+    if (!providerError) return failed('internal_error', base);
+    // The provider's own words, on the box and shipped: an API refusal names
+    // a status and a reason, not a client's file. What the agent printed
+    // around it stays on the detail line.
+    log.error('provider.failed', {
+      requestId,
+      provider: 'openrouter',
+      model,
+      statusCode: providerError.statusCode,
+      message: providerError.message,
+    });
+    return failed(
+      classifyModelFailure(providerError) ?? 'internal_error',
+      `${base}; the model provider answered ${providerError.statusCode}: ${providerError.message}`,
+    );
   }
 
   return { summary, cost };
@@ -596,11 +627,11 @@ function settle(
     };
   }
 
-  if (preview.kind === 'build_failed') {
+  if (preview.kind === 'build_failed' || preview.kind === 'hosting_limit') {
     return {
       ...shared,
       outcome: 'failed',
-      errorCode: 'build_failed',
+      errorCode: preview.kind,
       errorDetail: preview.detail,
       prose: null,
     };
@@ -717,6 +748,10 @@ export const DEFAULT_ERROR_DETAIL: Record<ErrorCode, string> = {
   blocked_by_policy: 'the change touched a path the policy does not permit',
   out_of_date: 'the branch moved under the request between reading and pushing',
   build_failed: 'the hosting provider reported a failed build',
+  model_quota: 'the model provider answered 429: the daily allowance is used up',
+  model_credit: 'the model provider refused for lack of credit',
+  model_unavailable: 'the model provider rejected the key, the model id, or is down',
+  hosting_limit: 'the hosting provider stopped the build because of a plan limit',
   internal_error: 'an unexpected fault; see the server log for this request id',
 };
 
@@ -809,6 +844,51 @@ async function alertCostCeiling(deps: RunDeps, input: RunInput, costUsd: number)
   );
 }
 
+const PROVIDER_LIMIT_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
+  'model_quota',
+  'model_credit',
+  'hosting_limit',
+]);
+
+function isProviderLimit(
+  code: ErrorCode | undefined,
+): code is 'model_quota' | 'model_credit' | 'hosting_limit' {
+  return code !== undefined && PROVIDER_LIMIT_CODES.has(code);
+}
+
+const PROVIDER_LIMIT_SUBJECT: Record<'model_quota' | 'model_credit' | 'hosting_limit', string> = {
+  model_quota: 'AI service daily allowance used up',
+  model_credit: 'AI service out of credit',
+  hosting_limit: 'Hosting plan limit reached',
+};
+
+/**
+ * Tells the developer a provider refused for a reason only they can fix: a
+ * quota, an empty account, a hosting plan. Same addressee and same rules as
+ * the cost-ceiling alert — figures and the provider's own sentence belong
+ * here, because the reader is the person who has to go and top something up.
+ * Cannot fail the request.
+ */
+async function alertProviderLimit(
+  deps: RunDeps,
+  input: RunInput,
+  code: 'model_quota' | 'model_credit' | 'hosting_limit',
+  detail: string | undefined,
+): Promise<void> {
+  const { alertContact } = deps.config.settings;
+  await alertOperator(
+    { mailer: deps.mailer, alertContact },
+    {
+      subject: `${PROVIDER_LIMIT_SUBJECT[code]} on ${deps.env.githubRepoOwner}/${deps.env.githubRepoName}`,
+      lines: [
+        `A change request stopped because of the provider, not the site: ${code}. Nothing was published.`,
+        `What the provider said: ${detail ?? DEFAULT_ERROR_DETAIL[code]}`,
+        `Every request on this site will end the same way until this is fixed. The conversation: ${deps.env.publicBaseUrl}/c/${input.conversationNumber}`,
+      ],
+    },
+  );
+}
+
 /**
  * A request the previous process abandoned leaves a lock and no ending. The
  * process that breaks the lock writes the ending, because it is the only one
@@ -841,8 +921,4 @@ async function recordAbandoned(
     // Recording the abandonment is a courtesy to the conversation's history;
     // failing to record it must not stop the request that is starting now.
   }
-}
-
-function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

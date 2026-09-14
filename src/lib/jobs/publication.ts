@@ -13,7 +13,8 @@ import { BRINGING_UP_TO_DATE, PUBLISH_REFUSALS, UNDO_REFUSALS } from '@/lib/jobs
 import { waitForPreview } from '@/lib/jobs/preview';
 import { pushBranch } from '@/lib/jobs/push';
 import type { Mirror, WorkingTree } from '@/lib/mirror/types';
-import type { NetlifyClient } from '@/lib/netlify';
+import { describe, log, stackOf } from '@/lib/log';
+import { isNetlifyPlanLimit, type NetlifyClient } from '@/lib/netlify';
 import { deployEffect } from '@/lib/netlify/webhook';
 import { notifyPublication, type Mailer } from '@/lib/notify/email';
 import type { Env, ErrorCode, RequestRecord, Stage } from '@/types';
@@ -114,10 +115,12 @@ export async function beginPublication(
   const fail = (errorCode: ErrorCode, cause?: unknown): PublicationBegun => {
     emit('failed');
     deps.bus.publish({ type: 'done', requestId, outcome: 'failed', errorCode });
-    console.error(`[webagent] ${input.kind} on conversation ${input.conversationNumber} failed`, {
+    log.error('publication.failed', {
       requestId,
+      kind: input.kind,
+      conversationNumber: input.conversationNumber,
       errorCode,
-      cause,
+      ...(cause !== undefined ? { error: describe(cause), stack: stackOf(cause) } : {}),
     });
     return { ok: false, reason: 'failed', errorCode, ...(cause !== undefined ? { cause } : {}) };
   };
@@ -164,14 +167,15 @@ export async function beginPublication(
     // The act has happened and the site's history says so; only the audit
     // entry is missing. Reported as a failure so nobody is told it went
     // smoothly, and logged with the commit so the entry can be written by hand.
-    console.error(
-      `[webagent] ${input.kind} on conversation ${input.conversationNumber} could not be recorded`,
-      {
-        requestId,
-        commitSha,
-        cause,
-      },
-    );
+    log.error('publication.failed', {
+      requestId,
+      kind: input.kind,
+      conversationNumber: input.conversationNumber,
+      commitSha,
+      note: 'the act happened; only the audit entry is missing',
+      error: describe(cause),
+      stack: stackOf(cause),
+    });
     return fail('internal_error', cause);
   }
 
@@ -300,6 +304,7 @@ async function bringUpToDate(
     },
   );
   if (preview.kind === 'build_failed') return { ok: false, errorCode: 'build_failed' };
+  if (preview.kind === 'hosting_limit') return { ok: false, errorCode: 'hosting_limit' };
   if (preview.kind === 'timed_out') return { ok: false, errorCode: 'site_unreachable' };
   return { ok: true };
 }
@@ -353,7 +358,9 @@ async function watchBuild(
   });
 
   if (ending.outcome === 'failed') {
-    console.error(`[webagent] the build after ${input.requestId} did not succeed`, {
+    log.error('publication.failed', {
+      requestId: input.requestId,
+      kind: 'production_build',
       errorCode: ending.errorCode,
       commitSha: input.commitSha,
     });
@@ -377,13 +384,20 @@ async function pollUntilBuilt(
     try {
       deploy = await deps.netlify.findDeployByCommit(commitSha);
     } catch (cause) {
-      // A provider that fails to answer once is asked again; only the deadline ends the wait.
-      console.error('[webagent] could not read the deploy list while waiting for a build', cause);
+      // The plan being out is an ending; a provider that fails to answer once
+      // is asked again, and only the deadline ends that wait.
+      if (isNetlifyPlanLimit(cause)) return { outcome: 'failed', errorCode: 'hosting_limit' };
+      log.warn('publication.failed', {
+        commitSha,
+        kind: 'deploy_list_retry',
+        error: describe(cause),
+      });
     }
     const effect = deploy ? deployEffect(deploy) : { kind: 'ignore' as const };
     if (effect.kind === 'preview_ready')
       return { outcome: 'succeeded', ...(liveUrl ? { liveUrl } : {}) };
     if (effect.kind === 'build_failed') return { outcome: 'failed', errorCode: 'build_failed' };
+    if (effect.kind === 'hosting_limit') return { outcome: 'failed', errorCode: 'hosting_limit' };
 
     await clock.sleep(Math.min(clock.interval, Math.max(0, clock.deadline - clock.now())));
   }
