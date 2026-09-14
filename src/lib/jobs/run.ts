@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { RepoClient } from '@/lib/github/types';
+import { log } from '@/lib/log';
+import { alertOperator } from '@/lib/notify/operator';
+import { stageDurations } from '@/lib/record/durations';
 import {
   discardAttachments,
   placeAttachments,
@@ -188,7 +191,7 @@ async function execute(
     tree = prepared.tree;
     controlDir = prepared.controlDir;
 
-    const slot = await waitForSlot(deps, machine);
+    const slot = await waitForSlot(deps, machine, requestId);
     if (!slot.ok) {
       return finish(deps, input, machine, {
         requestId,
@@ -272,7 +275,7 @@ async function execute(
       // which advances to a terminal stage. Saying so out loud costs nothing and
       // turns a silent lock leak into a line in the log if it ever stops being
       // true.
-      console.error(`[webagent] request ${requestId} ended without a terminal stage`);
+      log.error('request.lock_leak', { requestId });
     }
   }
 }
@@ -289,9 +292,21 @@ async function execute(
 async function waitForSlot(
   deps: RunDeps,
   machine: { advance(stage: 'queued'): void },
+  requestId: string,
 ): Promise<SlotOutcome> {
-  if (!deps.slots) return { ok: true };
-  return deps.slots.acquire({ onWait: () => machine.advance('queued') });
+  if (!deps.slots) return { ok: true, waitedMs: 0 };
+  const outcome = await deps.slots.acquire({ onWait: () => machine.advance('queued') });
+  // Only when it actually waited. A line per request that walked straight in
+  // would be one line per request saying nothing.
+  if (outcome.waitedMs > 0) {
+    log.info('slot.waited', {
+      requestId,
+      waitedMs: outcome.waitedMs,
+      granted: outcome.ok,
+      limit: deps.env.maxConcurrentRuns,
+    });
+  }
+  return outcome;
 }
 
 interface Prepared {
@@ -406,10 +421,14 @@ async function runAgent(
     // Logged here, not only stored: a non-zero exit used to leave nothing in
     // the server log, so a failed request could only be diagnosed by reading
     // the durable record. This puts the agent's own last words in `docker logs`.
-    console.error(`[webagent] agent run failed for request ${requestId}`, {
+    // The detail itself stays out of the line: it is the agent's own stdout,
+    // and this line is shipped off the box. Its size is the diagnostic — a
+    // zero-length detail means the agent died before saying anything.
+    log.error('agent.run_failed', {
+      requestId,
       errorCode,
       exitCode: run.exitCode,
-      detail: errorDetail,
+      errorDetailLength: errorDetail.length,
     });
     return { failure: { outcome: 'failed', errorCode, errorDetail, prose: null }, summary, cost };
   };
@@ -622,6 +641,33 @@ async function finish(
 
   const now = deps.now ?? (() => new Date());
   const record = buildRecord(result, machine.stages, now().toISOString());
+
+  // Emitted before the comment is written, deliberately. If GitHub is the
+  // thing that is broken, `createComment` throws and this function propagates
+  // — and the moment you most want a measurement is the moment the durable
+  // record cannot be written. Ordering it first is what guarantees the event
+  // exists then.
+  //
+  // `errorDetail` is not carried: it holds the agent's last output lines,
+  // untrusted model output taken over a client's private tree. The record
+  // keeps them, where the client already controls access.
+  log.info('request.ended', {
+    requestId: record.requestId,
+    conversationNumber: input.conversationNumber,
+    outcome: record.outcome,
+    errorCode: record.errorCode,
+    violation: record.violation,
+    model: record.model,
+    tokensIn: record.tokensIn,
+    tokensOut: record.tokensOut,
+    costUsd: record.costUsd,
+    filesChanged: record.filesChanged,
+    diffLines: record.diffLines,
+    commitSha: record.commitSha,
+    hasPreview: Boolean(record.previewUrl),
+    ...stageDurations(record),
+  });
+
   const prose = result.prose ?? proseFor(result);
   const comment = await deps.client.createComment(
     input.conversationNumber,
@@ -745,25 +791,18 @@ async function discard(tree: WorkingTree | null, controlDir: string | null): Pro
  */
 async function alertCostCeiling(deps: RunDeps, input: RunInput, costUsd: number): Promise<void> {
   const { alertContact, costCeilingUsd } = deps.config.settings;
-  if (!deps.mailer || !alertContact) return;
-
-  try {
-    await deps.mailer.send({
-      to: alertContact,
+  await alertOperator(
+    { mailer: deps.mailer, alertContact },
+    {
       subject: 'Cost ceiling reached on a change request',
-      text: [
+      lines: [
         `A change request on ${deps.env.githubRepoOwner}/${deps.env.githubRepoName} was stopped ` +
           `before it published anything: it cost $${costUsd}, and this site's ceiling ` +
           `is $${costCeilingUsd}.`,
         `Nothing was pushed. The conversation: ${deps.env.publicBaseUrl}/c/${input.conversationNumber}`,
-      ].join('\n\n'),
-    });
-  } catch (cause) {
-    console.error(
-      `[webagent] could not alert ${alertContact} that the cost ceiling was reached`,
-      cause,
-    );
-  }
+      ],
+    },
+  );
 }
 
 /**

@@ -58,7 +58,7 @@ function slotsThatQueueOnce(): AgentSlots & { readonly waits: number } {
     async acquire(options) {
       waits += 1;
       options?.onWait?.();
-      return { ok: true };
+      return { ok: true, waitedMs: 0 };
     },
   };
 }

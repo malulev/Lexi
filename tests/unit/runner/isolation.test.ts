@@ -112,6 +112,40 @@ describe('container environment', () => {
     ]);
   });
 
+  it('bounds the process count one agent run may take, and leaves memory uncapped', async () => {
+    const calls: Docker.ContainerCreateOptions[] = [];
+    const runner = createDockerRunner({
+      image: 'webagent-agent:test',
+      apiKey: 'or-key-abc123',
+      docker: createFakeDocker(calls),
+    });
+    const request: RunRequest = {
+      requestId: 'req-3',
+      workDir: '/srv/webagent/jobs/req-3/work',
+      controlDir: '/srv/webagent/jobs/req-3/control',
+      prompt: samplePrompt,
+      model: 'openrouter/anthropic/claude-sonnet-latest',
+      timeoutMs: 10_000,
+    };
+
+    await runner.run(request);
+
+    const host = calls[0]?.HostConfig;
+    // Deliberately uncapped. A measured run holds ~400 MB, so a 1 GB cap
+    // never bound one and only obscured where the real ceiling is: a
+    // stress test on a 2 vCPU / 3.8 GB host exhausted RAM at eight
+    // concurrent agents whether or not each was capped. MAX_CONCURRENT_RUNS
+    // is the control that actually holds the host inside its budget.
+    expect(host?.Memory).toBeUndefined();
+    expect(host?.MemorySwap).toBeUndefined();
+    // Kept: a fork bomb exhausts the host's process table regardless of how
+    // much memory any one run is allowed, which is a different failure.
+    expect(host?.PidsLimit).toBe(512);
+    // The existing narrowing must survive the change.
+    expect(host?.CapDrop).toEqual(['ALL']);
+    expect(host?.SecurityOpt).toEqual(['no-new-privileges']);
+  });
+
   it('refuses to run when controlDir is inside workDir, before ever touching Docker', async () => {
     const calls: Docker.ContainerCreateOptions[] = [];
     const runner = createDockerRunner({

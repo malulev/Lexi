@@ -1,3 +1,4 @@
+import { log } from '@/lib/log';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -159,14 +160,14 @@ async function verifyCode(request: Request): Promise<NextResponse> {
   // the guess was close or not. Which half failed goes to the log, never to
   // the caller.
   if (!signInLimiter.codesByAddress.allow(clientAddress(request))) {
-    console.warn('[webagent] sign-in code refused (rate limited)');
+    log.warn('auth.refused', { reason: 'rate_limited' });
     return NextResponse.json({ error: 'refused' }, { status: 401 });
   }
 
   const parsed = codeSchema.safeParse(await request.json().catch(() => null));
   const accepted = parsed.success && (await verifyTotpCode(parsed.data.code, env));
   if (!accepted) {
-    console.warn('[webagent] sign-in code refused (wrong code)');
+    log.warn('auth.refused', { reason: 'wrong_code' });
     return NextResponse.json({ error: 'refused' }, { status: 401 });
   }
 

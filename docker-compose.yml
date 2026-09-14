@@ -128,6 +128,14 @@ services:
       # application cannot see that — it only ever asks its own daemon — so the
       # budgeting is the operator's: see ops/README.md.
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
+      # The commit this image was built from, written into the client's .env by
+      # ops/release.sh. Served by /api/health so drift across a fleet is
+      # checkable from outside the box, and so a rollback is visible as a
+      # version going backwards rather than as silence.
+      APP_SHA: ${APP_SHA:-unknown}
+      # debug | info | warn | error. Structured lines go to stdout, which the
+      # daemon's json-file driver captures and the collector tails.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
 
     volumes:
       # Only the HOST half is configurable, and deliberately so. A client host
@@ -155,8 +163,46 @@ services:
       # a distinct PORT_HOST; never put PORT in .env.
       - '127.0.0.1:${PORT_HOST:-3000}:3000'
 
+    # `node -e` rather than curl or wget: node:22-slim ships neither
+    # reliably, and node is definitionally present with a global fetch. The
+    # liveness route does no I/O, so this cannot fail because GitHub is slow.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Startup validation reaches GitHub and Netlify before the server
+      # answers anything; failing the container while that is still in flight
+      # would restart it forever for no reason.
+      start_period: 40s
+
     # A restart brings the process back with no memory of what was running.
     # That is by design: an interrupted request is reconstructed from the pull
     # request it was writing to, and its lock is broken as stale by the next
     # request (FR-009). Nothing is lost that was not ephemeral to begin with.
     restart: unless-stopped
+
+    # Docker's default json-file driver keeps every line forever. Each client
+    # runs its own rootless daemon, but all of them write to the one
+    # filesystem that also holds /srv/lexi and every client's image store — so
+    # without a ceiling, one chatty installation fills the disk and takes down
+    # every other client with it. 30 MB per installation is enough to debug a
+    # bad release and small enough that twenty of them are a rounding error.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+    # The application is a Next standalone server that holds no request state;
+    # its steady-state footprint is tens of megabytes. The cap is here so that
+    # a leak in the app cannot take memory an agent run was budgeted, and so
+    # that a host running several installations fails one of them loudly
+    # rather than letting the OOM killer choose by size.
+    mem_limit: 512m

@@ -1,0 +1,185 @@
+// Grafana Alloy: the only resident monitoring process on the host.
+//
+// ---------------------------------------------------------------------------
+// LABEL DISCIPLINE — read before adding anything
+// ---------------------------------------------------------------------------
+// Only `job`, `slug`, `unit`, `level`, `event` and `stream` may be labels.
+//
+// Everything else stays a *field* inside the JSON line, parsed at query time
+// with `| json`, which in Loki costs nothing. `requestId`, `conversationNumber`,
+// `commitSha` and `previewUrl` are unbounded: promoting any one of them to a
+// label burns the free tier's series allowance in a day and cannot be undone
+// retroactively. `errorCode` is the one tempting exception that is genuinely
+// safe — it is a closed 14-value union in src/types/index.ts — and it is
+// promoted below for exactly that reason.
+// ---------------------------------------------------------------------------
+
+logging {
+  level = "warn"
+}
+
+// --- host metrics ----------------------------------------------------------
+//
+// node_exporter, built in, so there is no second process. Only the collectors
+// that say something about this box: the default set is roughly 2000 series
+// here, most of it about hardware a VPS does not have, and active series is
+// the scarce resource on the free tier.
+prometheus.exporter.unix "host" {
+  set_collectors = [
+    "cpu", "meminfo", "loadavg", "filesystem", "diskstats",
+    "netdev", "systemd", "uname", "time", "textfile", "pressure",
+  ]
+
+  filesystem {
+    // Rootless Docker keeps each client's data-root under their home, and one
+    // series per container overlay layer is the textbook cardinality
+    // explosion.
+    mount_points_exclude = "^/(dev|proc|sys|run|var/lib/docker/.+|home/[^/]+/\\.local/share/docker/.+)($|/)"
+  }
+
+  textfile {
+    // Written by ops/probe.sh: the per-client facts no generic exporter knows,
+    // including lexi_agents_limit_total.
+    directory = "/var/lib/node_exporter/textfile"
+  }
+}
+
+// Alloy's own footprint, so the RAM budget in MONITORING.md is provable rather
+// than asserted.
+prometheus.exporter.self "alloy" {}
+
+prometheus.scrape "host" {
+  targets = concat(
+    prometheus.exporter.unix.host.targets,
+    prometheus.exporter.self.alloy.targets,
+  )
+  forward_to      = [prometheus.remote_write.grafana.receiver]
+  scrape_interval = "60s"
+}
+
+prometheus.remote_write "grafana" {
+  endpoint {
+    url = sys.env("GRAFANA_PROM_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+    // Bounded deliberately: the write-ahead log sits on the same 38 GB
+    // filesystem as /srv/lexi and every client's image store, so an outage at
+    // the far end must not become a disk outage here.
+    queue_config {
+      capacity              = 2500
+      max_samples_per_send  = 500
+    }
+  }
+  wal {
+    truncate_frequency = "2h"
+  }
+}
+
+// --- application logs ------------------------------------------------------
+//
+// Alloy runs as root, so it reads each client's container logs straight off
+// disk. Deliberately NOT via discovery.docker against every
+// /run/user/<uid>/docker.sock: pointing one root process at every client's
+// daemon socket rebuilds exactly the blast radius that one-rootless-daemon-
+// per-user exists to remove.
+local.file_match "containers" {
+  path_targets = [{
+    __path__ = "/home/*/.local/share/docker/containers/*/*-json.log",
+    job      = "lexi",
+  }]
+}
+
+// The client slug comes from the path, at discovery time — not from a regex
+// stage in the pipeline. A processing stage reads the *extracted map*, and the
+// filename is a target label rather than an extracted field, so deriving it
+// there does not work.
+discovery.relabel "containers" {
+  targets = local.file_match.containers.targets
+
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/home/([^/]+)/.*"
+    target_label  = "slug"
+    replacement   = "$1"
+  }
+}
+
+loki.source.file "containers" {
+  targets    = discovery.relabel.containers.output
+  forward_to = [loki.process.lexi.receiver]
+}
+
+loki.process "lexi" {
+  // Docker's json-file envelope first; the application's own line is inside.
+  stage.json {
+    expressions = { output = "log", stream = "stream" }
+  }
+  stage.output {
+    source = "output"
+  }
+
+  // Keep only the structured envelope. This glob also matches AGENT container
+  // logs — raw model output taken over a client's private working tree, which
+  // must never leave this box. Allowlisting the envelope is what excludes it:
+  // an agent line carries no `event` field, so the extraction below leaves it
+  // empty and the drop stage removes the line.
+  //
+  // `source` + `value` together mean "drop when this extracted field equals
+  // this". Do not add `expression` as well — it is the other, mutually
+  // exclusive, way to spell the same stage.
+  stage.json {
+    expressions = { ts = "ts", level = "level", event = "event" }
+  }
+  stage.drop {
+    source              = "event"
+    value               = ""
+    drop_counter_reason = "not_a_lexi_event"
+  }
+
+  // `slug` is already a target label from discovery.relabel above.
+  stage.labels {
+    values = { level = "level", event = "event" }
+  }
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339"
+  }
+}
+
+loki.write "grafana" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+}
+
+// --- host journal ----------------------------------------------------------
+//
+// Caddy, dockerd, sshd and the per-client rootless daemons. Caddy's access
+// logs are here too, which is per-client HTTP status and latency for no
+// application code at all.
+loki.source.journal "host" {
+  forward_to = [loki.write.grafana.receiver]
+  labels     = { job = "systemd" }
+  relabel_rules = loki.relabel.journal.rules
+  max_age    = "12h"
+}
+
+loki.relabel "journal" {
+  forward_to = []
+  // Only the unit. Auto-promoting __journal__pid, _CMDLINE or _EXE is the
+  // journald cardinality trap: one series per process ever started.
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "unit"
+  }
+  rule {
+    source_labels = ["__journal__systemd_user_unit"]
+    target_label  = "user_unit"
+  }
+}

@@ -228,7 +228,13 @@ enable_linger() {
 run_as_client() {
   local uid
   uid="$(id -u "$SLUG")"
-  runuser -u "$SLUG" -- env \
+  # `-C /`: runuser does not change directory, so these commands inherit the
+  # caller's cwd. Called from a root-only directory (/root, say), the client
+  # user cannot stat `.`, and `docker compose` fails validation with
+  # "stat .: permission denied" — which this script would otherwise report as
+  # a *stopped* installation. A monitor that says down for a cwd it could not
+  # read is worse than no monitor.
+  runuser -u "$SLUG" -- env -C / \
     HOME="$(getent passwd "$SLUG" | cut -d: -f6)" \
     XDG_RUNTIME_DIR="/run/user/${uid}" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \

@@ -9,6 +9,7 @@
  */
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { SECRET_SHAPED_KEY } from '@/lib/log';
 import type { Settings } from '@/types';
 
 // `provider/model`, where the model half may itself contain slashes (e.g.
@@ -77,9 +78,11 @@ function rejectAllowedEmails(issue: z.core.$ZodIssue): never | void {
  * A developer who commits `netlifyToken` has not made a typo, they have
  * misunderstood where secrets live, and "unrecognized key" does not correct
  * that — it invites them to look for the right spelling.
+ *
+ * Imported rather than redefined: `lib/log` blanks a field whose name matches
+ * this on its way to a log line, and two copies of the rule would drift apart
+ * exactly where drifting is expensive.
  */
-const SECRET_SHAPED_KEY =
-  /secret|token|password|passphrase|api[-_]?key|private[-_]?key|credential/i;
 
 /** Rejects a secret committed to the site's repository rather than honouring it (FR-003d). */
 function rejectSecretShapedKey(issue: z.core.$ZodIssue): never | void {

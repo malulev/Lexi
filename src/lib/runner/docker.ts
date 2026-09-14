@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { assertControlDirOutsideWorkDir, readAgentResult } from './control';
 import { AGENT_LABEL } from './slots';
 import type { JobRunner, RunRequest, RunResult } from './types';
+import { log } from '@/lib/log';
 
 /**
  * The only real `JobRunner`: one throwaway container per request.
@@ -22,6 +23,9 @@ import type { JobRunner, RunRequest, RunResult } from './types';
  *    timed out, or failed before it ever started — because a leaked
  *    container is a leaked working tree and a leaked model spend.
  */
+
+/** Enough for node plus the agent's own children; far below the host's table. */
+export const AGENT_PIDS_LIMIT = 512;
 
 export interface CreateDockerRunnerOptions {
   image: string;
@@ -55,6 +59,17 @@ function buildContainerOptions(
       Binds: [`${request.workDir}:/work`, `${request.controlDir}:/control`],
       CapDrop: ['ALL'],
       SecurityOpt: ['no-new-privileges'],
+      // Memory is deliberately not capped here. A measured run holds ~400 MB,
+      // so the 1 GB cap this once carried never bound a real run; it only
+      // suggested the host was protected when it was not. Saturating a
+      // 2 vCPU / 3.8 GB host took eight concurrent agents to 0 MB available
+      // and load 115 — an outcome a per-container cap at any value above the
+      // working set does not change. `MAX_CONCURRENT_RUNS` is what holds the
+      // host inside its budget, and `slots.ts` is where its overshoot lives.
+      //
+      // `PidsLimit` stays: a fork bomb exhausts the host's process table
+      // rather than this cgroup, which no memory figure would have bounded.
+      PidsLimit: AGENT_PIDS_LIMIT,
       AutoRemove: false,
     },
   };
@@ -122,7 +137,8 @@ function logCleanupFailure(
   containerId: string,
   error: unknown,
 ): void {
-  console.error(`runner/docker: ${action} failed`, {
+  log.error('runner.cleanup_failed', {
+    action,
     requestId,
     containerId,
     error: describeError(error),

@@ -50,6 +50,9 @@ USAGE
 CLIENT_ROOT=/srv/lexi
 REGISTRY_PORT=5000
 HEALTH_TIMEOUT=120
+# Leave a failed client on the new, broken image instead of restoring the one
+# it was serving. For the operator who wants the wreckage to inspect.
+NO_ROLLBACK=0
 ONLY_CLIENT=""
 GIT_REF="HEAD"
 
@@ -92,6 +95,10 @@ parse_args() {
         [ $# -ge 2 ] || die "--timeout needs a value in seconds"
         HEALTH_TIMEOUT="$2"
         shift 2
+        ;;
+      --no-rollback)
+        NO_ROLLBACK=1
+        shift
         ;;
       -h | --help)
         usage
@@ -211,7 +218,13 @@ run_as_client() {
   shift
   local uid
   uid="$(id -u "$slug")"
-  runuser -u "$slug" -- env \
+  # `-C /`: runuser does not change directory, so these commands inherit the
+  # caller's cwd. Called from a root-only directory (/root, say), the client
+  # user cannot stat `.`, and `docker compose` fails validation with
+  # "stat .: permission denied" — which this script would otherwise report as
+  # a *stopped* installation. A monitor that says down for a cwd it could not
+  # read is worse than no monitor.
+  runuser -u "$slug" -- env -C / \
     HOME="$(getent passwd "$slug" | cut -d: -f6)" \
     XDG_RUNTIME_DIR="/run/user/${uid}" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus" \
@@ -281,10 +294,39 @@ wait_for_http() {
   local port="$1" deadline code
   deadline=$(($(date +%s) + HEALTH_TIMEOUT))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${port}/" || true)"
-    if [ -n "$code" ] && [ "$code" != "000" ]; then
+    # /api/health means one thing and does no I/O, so `-f` is finally correct
+    # here: `/` answers 307 to an unauthenticated caller whether or not the
+    # installation can do anything, which is why this used to accept any
+    # status at all and could not tell a good release from a wedged one.
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${port}/api/health" || true)"
+    if [ "$code" = "200" ]; then
       return 0
     fi
+    # An installation built before /api/health existed answers 404. Accept it
+    # rather than refusing to roll the release that introduces the route.
+    if [ "$code" = "404" ]; then
+      note "no /api/health on the running image yet; accepting any answer for this roll"
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+# Serving is not the same as able to work. Readiness re-runs the four startup
+# probes, so a release that starts cleanly against an expired credential is
+# caught here rather than by the client's next request.
+wait_for_ready() {
+  local port="$1" deadline body
+  deadline=$(($(date +%s) + HEALTH_TIMEOUT))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    body="$(curl -s --max-time 8 "http://127.0.0.1:${port}/api/ready" || true)"
+    case "$body" in
+      *'"status":"ready"'*) return 0 ;;
+      # Route absent on an older image: not a reason to fail the roll.
+      '') ;;
+      *'404'*) return 0 ;;
+    esac
     sleep 3
   done
   return 1
@@ -327,11 +369,22 @@ roll_client() {
     return 1
   }
 
+  # What to go back to. Captured before anything is overwritten, because the
+  # failure path below is the whole point: a client left with a new APP_IMAGE
+  # in its .env and a container that will not start comes back on the broken
+  # image at the next reboot, and nothing says so.
+  local previous_app previous_agent
+  previous_app="$(read_env_value "$env_file" APP_IMAGE)"
+  previous_agent="$(read_env_value "$env_file" AGENT_IMAGE)"
+
   # Written into .env, not exported for the one command: Compose interpolates
   # .env, and a client restarted by systemd or by hand after a reboot must come
   # back on the tag it was rolled to and not on whatever it was provisioned with.
   set_env_value "$env_file" APP_IMAGE "$APP_TAG" "$slug"
   set_env_value "$env_file" AGENT_IMAGE "$AGENT_TAG" "$slug"
+  # Served by /api/health, so a fleet's versions — and a rollback — are
+  # visible from outside the box.
+  set_env_value "$env_file" APP_SHA "$SHA" "$slug"
 
   run_as_client "$slug" docker compose -f "${dir}/docker-compose.yml" --project-directory "$dir" up -d || {
     echo "  ${slug}: 'docker compose up -d' failed" >&2
@@ -341,15 +394,58 @@ roll_client() {
   if ! wait_for_http "$port"; then
     echo "  ${slug}: no HTTP answer on 127.0.0.1:${port} within ${HEALTH_TIMEOUT}s." >&2
     echo "  ${slug}: startup validation refuses to serve on a bad setting and says which. Read: ops/status.sh ${slug} --logs" >&2
-    return 1
+    roll_back "$slug" "$dir" "$env_file" "$port" "$previous_app" "$previous_agent"
+    return $?
   fi
 
-  note "${slug} answering on 127.0.0.1:${port}"
+  if ! wait_for_ready "$port"; then
+    echo "  ${slug}: serving, but not ready within ${HEALTH_TIMEOUT}s — it cannot reach something it needs." >&2
+    echo "  ${slug}: which setting: curl -s 127.0.0.1:${port}/api/ready" >&2
+    roll_back "$slug" "$dir" "$env_file" "$port" "$previous_app" "$previous_agent"
+    return $?
+  fi
+
+  note "${slug} answering and ready on 127.0.0.1:${port}"
   return 0
 }
 
+# Puts a client back on the images it was serving before this roll.
+#
+# Returns 2 — not 1 — when the rollback itself succeeds, so the summary can
+# say ROLLED-BACK rather than FAILED. They are different situations for whoever
+# reads it: one client is still serving its old version, the other is down.
+roll_back() {
+  local slug="$1" dir="$2" env_file="$3" port="$4" previous_app="$5" previous_agent="$6"
+
+  if [ "$NO_ROLLBACK" -eq 1 ]; then
+    note "${slug}: leaving the failed container in place (--no-rollback)"
+    return 1
+  fi
+  if [ -z "$previous_app" ]; then
+    note "${slug}: nothing to roll back to — this client had no previous image"
+    return 1
+  fi
+
+  note "${slug}: rolling back to ${previous_app}"
+  set_env_value "$env_file" APP_IMAGE "$previous_app" "$slug"
+  [ -n "$previous_agent" ] && set_env_value "$env_file" AGENT_IMAGE "$previous_agent" "$slug"
+  set_env_value "$env_file" APP_SHA "rolled-back" "$slug"
+
+  if ! run_as_client "$slug" docker compose -f "${dir}/docker-compose.yml" --project-directory "$dir" up -d; then
+    echo "  ${slug}: rollback could not start the previous image either. This client is DOWN." >&2
+    return 1
+  fi
+  if ! wait_for_http "$port"; then
+    echo "  ${slug}: rollback started but does not answer. This client is DOWN." >&2
+    return 1
+  fi
+
+  note "${slug}: back on its previous image and answering"
+  return 2
+}
+
 roll_all() {
-  local dir slug outcome image
+  local dir slug outcome image status
   local rolled=0
 
   for dir in "$CLIENT_ROOT"/*/; do
@@ -362,12 +458,25 @@ roll_all() {
     fi
 
     rolled=$((rolled + 1))
-    if roll_client "$slug"; then
-      outcome="ok"
-    else
-      outcome="FAILED"
-      FAILURES=$((FAILURES + 1))
-    fi
+    # 0 rolled cleanly, 2 failed but was restored to its previous image, 1
+    # failed and is down. The middle case is the one worth naming: that client
+    # is still serving, just not this version.
+    # `|| status=$?` and not a bare call: under `set -e` a non-zero return
+    # from roll_client would end the whole release before this case ran, and
+    # every remaining client would be skipped silently.
+    status=0
+    roll_client "$slug" || status=$?
+    case "$status" in
+      0) outcome="ok" ;;
+      2)
+        outcome="ROLLED-BACK"
+        FAILURES=$((FAILURES + 1))
+        ;;
+      *)
+        outcome="FAILED"
+        FAILURES=$((FAILURES + 1))
+        ;;
+    esac
     image="$(running_image "$slug" "${CLIENT_ROOT}/${slug}")"
     SUMMARY+=("${slug}"$'\t'"${outcome}"$'\t'"${image}")
   done
@@ -393,9 +502,24 @@ print_summary() {
   echo "release: every client rolled is on ${SHA}."
 }
 
+# Held while a roll is in progress. Every app-down alert carries
+# `unless lexi_maintenance == 1`, so a deploy does not page anyone — which is
+# how alert systems get muted, and a muted alert looks like coverage without
+# being any.
+MAINTENANCE_FLAG=/var/lib/lexi/maintenance
+
+begin_maintenance() {
+  mkdir -p "$(dirname -- "$MAINTENANCE_FLAG")"
+  : >"$MAINTENANCE_FLAG"
+  # On every exit path, including a failure and an interrupt: a flag left set
+  # is a fleet that has silently stopped alerting.
+  trap 'rm -f "$MAINTENANCE_FLAG"' EXIT INT TERM
+}
+
 main() {
   parse_args "$@"
   require_root
+  begin_maintenance
   resolve_sha
   require_registry
   build_images

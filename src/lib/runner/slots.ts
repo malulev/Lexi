@@ -1,4 +1,5 @@
 import type Docker from 'dockerode';
+import { log } from '@/lib/log';
 
 /**
  * Host-wide agent slots, with the Docker daemon as the semaphore.
@@ -23,7 +24,15 @@ import type Docker from 'dockerode';
 
 export const AGENT_LABEL = 'webagent.agent';
 
-export type SlotOutcome = { ok: true } | { ok: false; waitedMs: number };
+/**
+ * `waitedMs` on both branches, not only on failure.
+ *
+ * It used to exist only when a request gave up, which meant capacity pressure
+ * was invisible until it became an outright refusal — the one point at which
+ * it is too late to act on. A request that waited eight minutes and then ran
+ * is the early warning.
+ */
+export type SlotOutcome = { ok: true; waitedMs: number } | { ok: false; waitedMs: number };
 
 export interface AgentSlots {
   /**
@@ -36,7 +45,7 @@ export interface AgentSlots {
 
 /** For tests and single-site development: every request runs at once. */
 export const UNLIMITED_SLOTS: AgentSlots = {
-  acquire: async () => ({ ok: true }),
+  acquire: async () => ({ ok: true, waitedMs: 0 }),
 };
 
 export interface CreateDockerSlotsOptions {
@@ -79,9 +88,10 @@ export async function countRunningAgents(docker: Pick<Docker, 'listContainers'>)
     });
     return containers.length;
   } catch (error) {
-    console.error('runner/slots: could not count running agents, proceeding as if none', {
-      error: describe(error),
-    });
+    // Worth an event of its own: returning 0 here means the concurrency cap
+    // has silently stopped existing, which is the precondition for the host
+    // running out of memory ten minutes later.
+    log.error('slots.count_failed', { error: describe(error) });
     return 0;
   }
 }
@@ -99,7 +109,7 @@ export function createDockerSlots(options: CreateDockerSlotsOptions): AgentSlots
 
     for (;;) {
       const running = await countRunningAgents(options.docker);
-      if (running < options.limit) return { ok: true };
+      if (running < options.limit) return { ok: true, waitedMs: now() - startedAt };
 
       const waitedMs = now() - startedAt;
       if (waitedMs >= maxWaitMs) return { ok: false, waitedMs };
