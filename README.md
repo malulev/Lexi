@@ -194,7 +194,7 @@ site to modify:
 the-client-site/
 ├── .webagent/
 │   ├── config.yml     required — the installation refuses to run without it
-│   └── policy.yml     optional — omitting it means `allow: ['**']`, so write one
+│   └── policy.yml     required — without it the agent may touch every file (`allow: ['**']`)
 └── AGENTS.md          optional — advisory guidance, at the repository root
 ```
 
@@ -244,9 +244,10 @@ secrets live, not a typo, and the file is refused rather than honoured.
 When this file is invalid the **last valid settings stay in force**, the fault goes to
 `alertContact`, and the log names it. Access control never falls open on a broken file.
 
-### `.webagent/policy.yml` — what the agent may change
+### `.webagent/policy.yml` — required
 
-Optional, but a missing file means the defaults, and the default `allow` is `['**']`. Write one.
+Write one before the first request. The installation still starts without it, but a missing file
+means the defaults, and the default `allow` is `['**']`: every file in the site is fair game.
 
 ```yaml
 allow:
