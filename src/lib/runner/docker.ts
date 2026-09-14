@@ -70,20 +70,19 @@ function buildContainerOptions(
       // `PidsLimit` stays: a fork bomb exhausts the host's process table
       // rather than this cgroup, which no memory figure would have bounded.
       PidsLimit: AGENT_PIDS_LIMIT,
-      // The agent's stdout is never written to disk.
+      // NOT `LogConfig: { Type: 'none' }`, however much this wants to be.
       //
-      // It is the model's raw working transcript over a client's private tree:
-      // whole files it read, their contents, its own reasoning. The host
-      // streams it live through `attach` for progress, and keeps a bounded
-      // tail in the pull request where the client already controls access —
-      // but a json-file on disk is a copy nobody asked for, sitting in the
-      // directory a log collector globs. It reached an external log service
-      // exactly once, which is how this line came to exist.
+      // The agent's stdout is the model's working transcript over a client's
+      // private tree, and Docker writes it to a json-file in the directory a
+      // log collector globs — which is how it once reached an external log
+      // service. Turning the log driver off looked like the structural fix.
+      // It broke the agent run: `wireOutput` reads that output back through
+      // `container.attach()`, and on this daemon attach does not survive the
+      // driver being `none`, so every request saw an agent that said nothing.
       //
-      // Filtering it out downstream is a policy that can be got wrong; not
-      // writing it is a property that cannot. `attach` streams from the
-      // daemon and is unaffected by the log driver.
-      LogConfig: { Type: 'none', Config: {} },
+      // The transcript is therefore kept off the wire downstream instead —
+      // see the line filter in ops/monitoring/alloy/config.alloy, and the
+      // reason it has to be a line match rather than a field comparison.
       AutoRemove: false,
     },
   };
