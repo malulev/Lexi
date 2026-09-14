@@ -30,18 +30,24 @@ produces an image whose tag does not identify what is in it.
 None of this needs the new code. Do it first; it is the cheapest reliability
 work in the whole plan.
 
+**On a fresh host this is automatic** — `ops/bootstrap-host.sh` now creates the
+swapfile and runs `ops/install-monitoring.sh` as part of preparing the box. An
+existing host that was bootstrapped before that either re-runs it (idempotent,
+though it briefly recreates the image registry container) or does this by hand:
+
 ```bash
 ssh root@<host>
 
-# 2 GB swap. With zero swap and a summed agent ceiling of 3 GB against 3819 MB
-# of RAM, the first real concurrency spike is an OOM kill rather than a slow
-# request — and the kernel picks its victim by size, so it can just as easily
-# take Caddy or another client's app.
+# Swap. Agent containers are capped at 1 GiB each, but the ceiling is the SUM
+# of every client's MAX_CONCURRENT_RUNS — 3 GB here against 3819 MB of RAM. With
+# no swap the kernel resolves that by killing something, and it picks by size,
+# so it can take Caddy or another client's app rather than the run that caused
+# it. Swap turns the overshoot into slowness, which is recoverable.
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-# Cap the host daemon's container logs. Uncapped today, on a filesystem shared
-# with /srv/lexi and every client's image store.
+# Cap the host daemon's container logs. Uncapped by default, on a filesystem
+# shared with /srv/lexi and every client's image store.
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<'JSON'
 { "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
@@ -52,13 +58,18 @@ systemctl restart docker
 **Verify:**
 
 ```bash
-free -m          # Swap row is no longer 0
-df -h /          # note the figure, to compare later
+free -m          # the Swap row is no longer 0
+swapon --show    # /swapfile, 2G
+df -h /          # note the figure, to compare after a week
 ```
 
 > Each **client's rootless daemon** has its own config and is not covered by
 > `/etc/docker/daemon.json`. Their app containers are capped by the `logging:`
 > block in `docker-compose.yml`, which arrives in step 2.
+
+> `install-monitoring.sh` will **not** overwrite an existing
+> `/etc/docker/daemon.json`. If you already had one, confirm yourself that it
+> sets `log-opts`.
 
 ---
 
@@ -72,15 +83,15 @@ ops/release.sh
 This is the release that starts enforcing things, so read what it now does
 differently:
 
-| New behaviour | Consequence |
-|---|---|
-| Agent containers capped at 1 GiB, `MemorySwap` equal, `PidsLimit` 512 | A runaway agent dies alone instead of triggering the OOM killer |
-| `mem_limit: 512m` and log rotation on the app service | Per-client log ceiling of 30 MB |
-| Compose `healthcheck:` against `/api/health` | `docker ps` shows real health |
-| Waits for `/api/health` **and** `/api/ready` | A release that starts but cannot reach GitHub now fails instead of passing |
-| **Rolls back on failure** | A failed client returns to its previous image and reports `ROLLED-BACK`, not `FAILED` |
-| Writes `APP_SHA` per client | Version drift is visible from outside the box |
-| Holds `/var/lib/lexi/maintenance` while rolling | Alerts stay quiet during deploys |
+| New behaviour                                                         | Consequence                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Agent containers capped at 1 GiB, `MemorySwap` equal, `PidsLimit` 512 | A runaway agent dies alone instead of triggering the OOM killer                       |
+| `mem_limit: 512m` and log rotation on the app service                 | Per-client log ceiling of 30 MB                                                       |
+| Compose `healthcheck:` against `/api/health`                          | `docker ps` shows real health                                                         |
+| Waits for `/api/health` **and** `/api/ready`                          | A release that starts but cannot reach GitHub now fails instead of passing            |
+| **Rolls back on failure**                                             | A failed client returns to its previous image and reports `ROLLED-BACK`, not `FAILED` |
+| Writes `APP_SHA` per client                                           | Version drift is visible from outside the box                                         |
+| Holds `/var/lib/lexi/maintenance` while rolling                       | Alerts stay quiet during deploys                                                      |
 
 **Verify:**
 
@@ -182,8 +193,14 @@ which nothing in the product can see.
 ```bash
 systemctl stop lexi-probe.timer
 # wait out the grace period; confirm the email arrives
-systemctl start lexi-probe.timer
+systemctl start lexi-probe.timer      # do not forget this
 ```
+
+Only the 60-second run pings — `lexi-probe-full.timer` deliberately does not,
+so stopping this one timer is enough to make the check go red. And the test
+proves nothing until `HEARTBEAT_URL` is set and the check has had at least one
+successful ping: with an empty URL `probe.sh` never pings, so there is no
+signal to lose.
 
 An alert you have never seen fire is not an alert.
 
@@ -272,13 +289,13 @@ during normal work gets muted — which looks like coverage without being any.
 
 **Then fire each one deliberately, once:**
 
-| Rule | How to trigger it safely |
-|---|---|
-| A1 client down | stop one client's app container, wait 3 min, start it |
-| A4 disk | `fallocate` a large file on a scratch path, then delete it |
-| A5b memory | check the threshold against `free -m` rather than actually exhausting RAM |
-| A7 startup refusal | break `NETLIFY_SITE_ID` in a scratch installation only |
-| A13 readiness | same scratch installation |
+| Rule               | How to trigger it safely                                                  |
+| ------------------ | ------------------------------------------------------------------------- |
+| A1 client down     | stop one client's app container, wait 3 min, start it                     |
+| A4 disk            | `fallocate` a large file on a scratch path, then delete it                |
+| A5b memory         | check the threshold against `free -m` rather than actually exhausting RAM |
+| A7 startup refusal | break `NETLIFY_SITE_ID` in a scratch installation only                    |
+| A13 readiness      | same scratch installation                                                 |
 
 Never test A7 or A13 against a live client.
 
@@ -291,16 +308,16 @@ keeps working when the other two are down.
 
 ### 1. On the box — no accounts, nothing installed
 
-| What | Where |
-|---|---|
-| Fleet state, one row per client | `cd /tmp && ops/status.sh` |
-| Same, machine-readable | `ops/status.sh --json` · `ops/status.sh --prom` |
-| One client's application log | `ops/status.sh <slug> --logs --tail 200` |
-| Raw container logs on disk | `/home/<slug>/.local/share/docker/containers/*/*-json.log` |
-| Caddy, dockerd, sshd | `journalctl -u caddy -n 100` · `journalctl -u docker` |
-| A client's rootless daemon | `journalctl --user-unit docker -M <slug>@` |
-| The metrics file the collector reads | `/var/lib/node_exporter/textfile/lexi.prom` |
-| Is a release in progress | `ls /var/lib/lexi/maintenance` |
+| What                                 | Where                                                      |
+| ------------------------------------ | ---------------------------------------------------------- |
+| Fleet state, one row per client      | `cd /tmp && ops/status.sh`                                 |
+| Same, machine-readable               | `ops/status.sh --json` · `ops/status.sh --prom`            |
+| One client's application log         | `ops/status.sh <slug> --logs --tail 200`                   |
+| Raw container logs on disk           | `/home/<slug>/.local/share/docker/containers/*/*-json.log` |
+| Caddy, dockerd, sshd                 | `journalctl -u caddy -n 100` · `journalctl -u docker`      |
+| A client's rootless daemon           | `journalctl --user-unit docker -M <slug>@`                 |
+| The metrics file the collector reads | `/var/lib/node_exporter/textfile/lexi.prom`                |
+| Is a release in progress             | `ls /var/lib/lexi/maintenance`                             |
 
 The application log is JSON, one object per line. Read it with `grep`, or more
 comfortably:
@@ -359,19 +376,19 @@ instance to validate one against.
 
 **Dashboards → New → New dashboard**, then add these panels. Each is one query.
 
-| Panel | Type | Query |
-|---|---|---|
-| Clients up | Stat | `lexi_client_app_up` |
-| Credentials valid | Stat | `lexi_client_ready_ok` |
-| Memory headroom | Time series, two series | `node_memory_MemAvailable_bytes` and `lexi_agents_limit_total * 1073741824` |
-| Disk free | Gauge | `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}` |
-| Requests by outcome | Bar chart | `sum by (outcome) (count_over_time({job="lexi", event="request.ended"} \| json [1d]))` |
-| Failures by cause | Table | `sum by (errorCode) (count_over_time({job="lexi", event="request.ended"} \| json \| outcome="failed" [7d]))` |
-| Duration p95 | Time series | `quantile_over_time(0.95, {job="lexi", event="request.ended"} \| json \| unwrap durationMs [1h])` |
-| Where the time goes | Time series, three series | same, unwrapping `runningMs`, `buildingMs`, `preparingMs` |
-| Spend per client per day | Bar chart | `sum by (slug) (sum_over_time({job="lexi", event="request.ended"} \| json \| unwrap costUsd [1d]))` |
-| Queue wait p90 | Time series | `quantile_over_time(0.9, {job="lexi", event="slot.waited"} \| json \| unwrap waitedMs [1d])` |
-| Undos | Stat | `count_over_time({job="lexi", event="publication.ended"} \| json \| kind="undo" [7d])` |
+| Panel                    | Type                      | Query                                                                                                        |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Clients up               | Stat                      | `lexi_client_app_up`                                                                                         |
+| Credentials valid        | Stat                      | `lexi_client_ready_ok`                                                                                       |
+| Memory headroom          | Time series, two series   | `node_memory_MemAvailable_bytes` and `lexi_agents_limit_total * 1073741824`                                  |
+| Disk free                | Gauge                     | `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}`                   |
+| Requests by outcome      | Bar chart                 | `sum by (outcome) (count_over_time({job="lexi", event="request.ended"} \| json [1d]))`                       |
+| Failures by cause        | Table                     | `sum by (errorCode) (count_over_time({job="lexi", event="request.ended"} \| json \| outcome="failed" [7d]))` |
+| Duration p95             | Time series               | `quantile_over_time(0.95, {job="lexi", event="request.ended"} \| json \| unwrap durationMs [1h])`            |
+| Where the time goes      | Time series, three series | same, unwrapping `runningMs`, `buildingMs`, `preparingMs`                                                    |
+| Spend per client per day | Bar chart                 | `sum by (slug) (sum_over_time({job="lexi", event="request.ended"} \| json \| unwrap costUsd [1d]))`          |
+| Queue wait p90           | Time series               | `quantile_over_time(0.9, {job="lexi", event="slot.waited"} \| json \| unwrap waitedMs [1d])`                 |
+| Undos                    | Stat                      | `count_over_time({job="lexi", event="publication.ended"} \| json \| kind="undo" [7d])`                       |
 
 Put **memory headroom** and **spend per client** at the top. They are the two
 that tell you something before a client does: the first is this box's actual
@@ -385,14 +402,14 @@ dashboard for the Lexi-specific panels above.
 
 ## If something goes wrong
 
-| Symptom | What to do |
-|---|---|
-| A client is `ROLLED-BACK` | It is serving its old version. `curl 127.0.0.1:<PORT>/api/ready` names the faulty setting. |
-| A client is `FAILED` | The rollback failed too — that client is down. `ops/status.sh <slug> --logs`. |
-| Alerts firing during every deploy | The `unless lexi_maintenance == 1` clause is missing from a rule. |
-| Alerts silent after a crashed deploy | `rm -f /var/lib/lexi/maintenance` — the trap should clear it, but check. |
-| Alloy eating memory | The drop-in caps it at 200M. If it is being killed repeatedly, reduce what `config.alloy` collects rather than raising the cap. |
-| Free-tier data stops arriving | You are probably at the cap. Drop `debug`-level logs first; keep `request.ended` always. |
+| Symptom                              | What to do                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| A client is `ROLLED-BACK`            | It is serving its old version. `curl 127.0.0.1:<PORT>/api/ready` names the faulty setting.                                      |
+| A client is `FAILED`                 | The rollback failed too — that client is down. `ops/status.sh <slug> --logs`.                                                   |
+| Alerts firing during every deploy    | The `unless lexi_maintenance == 1` clause is missing from a rule.                                                               |
+| Alerts silent after a crashed deploy | `rm -f /var/lib/lexi/maintenance` — the trap should clear it, but check.                                                        |
+| Alloy eating memory                  | The drop-in caps it at 200M. If it is being killed repeatedly, reduce what `config.alloy` collects rather than raising the cap. |
+| Free-tier data stops arriving        | You are probably at the cap. Drop `debug`-level logs first; keep `request.ended` always.                                        |
 
 **To undo the code entirely:** `git revert` the rollout commit and run
 `ops/release.sh`. Nothing here changes any persistent data format — the record

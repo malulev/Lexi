@@ -32,6 +32,9 @@ Idempotent: re-running repairs a partial run and changes nothing else.
 
 Options:
   --registry-port <port>  Loopback port for the image registry (default 5000).
+  --swap-size <size>      Swapfile size, in fallocate's units (default 2G).
+  --no-swap               Do not create a swapfile.
+  --no-monitoring         Do not install the metrics timers and log caps.
   -h, --help              Show this message.
 
 After this, create a client with:
@@ -39,7 +42,12 @@ After this, create a client with:
 USAGE
 }
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 REGISTRY_PORT=5000
+SWAP_SIZE=2G
+WITH_SWAP=1
+WITH_MONITORING=1
 REGISTRY_NAME=lexi-registry
 REGISTRY_VOLUME=lexi-registry-data
 CLIENT_ROOT=/srv/lexi
@@ -66,6 +74,19 @@ parse_args() {
         [ $# -ge 2 ] || die "--registry-port needs a value"
         REGISTRY_PORT="$2"
         shift 2
+        ;;
+      --swap-size)
+        [ $# -ge 2 ] || die "--swap-size needs a size, e.g. 2G"
+        SWAP_SIZE="$2"
+        shift 2
+        ;;
+      --no-swap)
+        WITH_SWAP=0
+        shift
+        ;;
+      --no-monitoring)
+        WITH_MONITORING=0
+        shift
         ;;
       -h | --help)
         usage
@@ -204,6 +225,52 @@ verify_registry() {
   die "the registry did not answer http://127.0.0.1:${REGISTRY_PORT}/v2/ within 10s. Check: docker logs ${REGISTRY_NAME}"
 }
 
+# A host with no swap resolves memory pressure by killing something, and the
+# kernel picks by size — which on this box can be Caddy or another client's
+# app rather than the agent run that caused it. Agent containers are capped at
+# 1 GiB each (src/lib/runner/docker.ts), but the ceiling is the SUM of every
+# client's MAX_CONCURRENT_RUNS and nothing stops that exceeding RAM. Swap turns
+# the overshoot into slowness, which is recoverable, instead of a kill, which
+# is not.
+ensure_swap() {
+  if [ "$WITH_SWAP" -eq 0 ]; then
+    note "skipping swap (--no-swap)"
+    return 0
+  fi
+  if [ "$(swapon --show --noheadings 2>/dev/null | wc -l)" -gt 0 ]; then
+    note "swap already active; leaving it alone"
+    return 0
+  fi
+  if [ -e /swapfile ]; then
+    note "/swapfile exists but is not active; leaving it alone rather than guessing"
+    return 0
+  fi
+
+  note "creating a ${SWAP_SIZE} swapfile"
+  fallocate -l "$SWAP_SIZE" /swapfile || die "could not allocate /swapfile (disk full?)"
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null || die "mkswap failed"
+  swapon /swapfile || die "swapon failed"
+  # Survives a reboot, and only added once.
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+  note "swap active: $(swapon --show --noheadings | awk '{print $3}')"
+}
+
+# The metrics timers, journald caps and Docker log rotation. Deliberately
+# without Alloy: that needs Grafana Cloud credentials a fresh host does not
+# have, and install-monitoring.sh takes --with-alloy for later.
+install_monitoring() {
+  if [ "$WITH_MONITORING" -eq 0 ]; then
+    note "skipping monitoring (--no-monitoring)"
+    return 0
+  fi
+  [ -x "${SCRIPT_DIR}/install-monitoring.sh" ] || {
+    note "install-monitoring.sh not found; skipping. Run it by hand later."
+    return 0
+  }
+  "${SCRIPT_DIR}/install-monitoring.sh"
+}
+
 main() {
   parse_args "$@"
   require_root
@@ -213,6 +280,8 @@ main() {
   create_client_root
   start_registry
   verify_registry
+  ensure_swap
+  install_monitoring
 
   cat <<EOF
 
@@ -220,6 +289,10 @@ bootstrap-host: done. This host is ready for clients.
 
 Next:
   ops/provision-client.sh <slug> <hostname> <port>
+
+Monitoring is installed but inert until it has somewhere to report:
+  \$EDITOR /etc/lexi/monitoring.env    # HEARTBEAT_URL at minimum
+See ops/MONITORING.md.
 
 Note the registry port if you changed it (${REGISTRY_PORT}); release.sh and
 provision-client.sh both default to 5000 and take --registry-port to match.
