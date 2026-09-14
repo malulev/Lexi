@@ -49,7 +49,7 @@ prometheus.exporter.unix "host" {
 prometheus.exporter.self "alloy" {}
 
 prometheus.scrape "host" {
-  targets = concat(
+  targets = array.concat(
     prometheus.exporter.unix.host.targets,
     prometheus.exporter.self.alloy.targets,
   )
@@ -127,6 +127,8 @@ loki.source.file "containers" {
 }
 
 loki.process "lexi" {
+  forward_to = [loki.write.grafana.receiver]
+
   // Docker's json-file envelope first; the application's own line is inside.
   stage.json {
     expressions = { output = "log", stream = "stream" }
