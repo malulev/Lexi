@@ -25,6 +25,10 @@ export type LogEvent =
   | 'readiness.probed'
   // Faults that are handled but worth counting.
   | 'agent.run_failed'
+  // The agent's own last words, on a line the collector drops before shipping
+  // (ops/monitoring/alloy/config.alloy). Read it with `docker logs`; it never
+  // reaches the external log service.
+  | 'agent.run_failed_detail'
   | 'runner.cleanup_failed'
   | 'lock.broken_stale'
   | 'lock.release_failed'

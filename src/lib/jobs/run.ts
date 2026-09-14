@@ -418,18 +418,22 @@ async function runAgent(
 
   const failed = (errorCode: ErrorCode, base: string): AgentPass => {
     const errorDetail = appendAgentOutput(base, outputTail);
-    // Logged here, not only stored: a non-zero exit used to leave nothing in
-    // the server log, so a failed request could only be diagnosed by reading
-    // the durable record. This puts the agent's own last words in `docker logs`.
-    // The detail itself stays out of the line: it is the agent's own stdout,
-    // and this line is shipped off the box. Its size is the diagnostic — a
-    // zero-length detail means the agent died before saying anything.
+    // Two lines, deliberately. The first is the counted failure and ships
+    // off the box: it carries the size of the detail, never the detail. The
+    // second carries the agent's own last words — its stdout over a client's
+    // private tree — so that an operator with `docker logs` can read why a
+    // request failed without opening the durable record. That line is
+    // dropped by the collector before anything leaves this host
+    // (ops/monitoring/alloy/config.alloy matches its event name), which is
+    // why the detail must not be folded into the first line: one line either
+    // ships or does not.
     log.error('agent.run_failed', {
       requestId,
       errorCode,
       exitCode: run.exitCode,
       errorDetailLength: errorDetail.length,
     });
+    log.error('agent.run_failed_detail', { requestId, errorCode, errorDetail });
     return { failure: { outcome: 'failed', errorCode, errorDetail, prose: null }, summary, cost };
   };
 

@@ -153,14 +153,28 @@ loki.process "lexi" {
   // including the contents of a client's private files, into an external log
   // service. Matching the raw line has no absent case.
   //
-  // Defence in depth only: agent containers are created with the `none` log
-  // driver (src/lib/runner/docker.ts), so their output is not on disk for this
-  // glob to find in the first place.
+  // This is the only thing keeping the transcript off the wire. Agent
+  // containers cannot use the `none` log driver — `attach` stops delivering
+  // output on this daemon when they do (src/lib/runner/docker.ts) — so the
+  // json-file is on disk and this glob does find it.
   stage.match {
     selector = "{job=\"lexi\"} !~ \".*\\\"event\\\":.*\""
     action   = "drop"
 
     drop_counter_reason = "not_a_lexi_event"
+  }
+
+  // The one application line that carries agent output: the agent's last
+  // words when a run fails (`agent.run_failed_detail`, src/lib/jobs/run.ts).
+  // It exists so `docker logs` explains a failure on the box; it is dropped
+  // here for the same reason the transcript is. Its counted twin,
+  // `agent.run_failed`, carries no detail and ships. A line match again, for
+  // the reason above.
+  stage.match {
+    selector = "{job=\"lexi\"} |= \"\\\"event\\\":\\\"agent.run_failed_detail\\\"\""
+    action   = "drop"
+
+    drop_counter_reason = "agent_output"
   }
 
   stage.json {

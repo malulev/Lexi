@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   claimConversationBranch,
@@ -232,6 +232,35 @@ describe('an agent whose container dies mid-edit', () => {
     expect(outcome.started && outcome.outcome).toBe('failed');
     await expectFailureReads(harness, pullRequest.number, 'internal_error');
     expect(await branchExists(harness.originDir, pullRequest.headRef)).toBe(false);
+  });
+
+  it("puts the agent's last words in the server log, on their own line", async () => {
+    harness = await createHarness({
+      script: { ...editsTheHomepage(), exitCode: 1, output: ['opencode: model refused: quota'] },
+    });
+    const pullRequest = await openConversation(harness.client);
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+
+    try {
+      await sendRequest(harness, pullRequest.number, pullRequest.headRef);
+    } finally {
+      spy.mockRestore();
+    }
+
+    const lines = written.map((line) => JSON.parse(line) as Record<string, unknown>);
+    const failed = lines.find((line) => line.event === 'agent.run_failed');
+    const detail = lines.find((line) => line.event === 'agent.run_failed_detail');
+    expect(failed, 'the counted failure line').toBeTruthy();
+    expect(failed?.errorDetail, 'the counted line ships off the box and must stay small').toBeUndefined();
+    expect(detail, 'a separate line the collector drops').toBeTruthy();
+    expect(detail?.requestId).toBe(failed?.requestId);
+    expect(detail?.errorCode).toBe('internal_error');
+    expect(detail?.errorDetail).toContain('exited with status 1');
+    expect(detail?.errorDetail).toContain('opencode: model refused: quota');
   });
 });
 
