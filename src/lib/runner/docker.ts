@@ -70,6 +70,20 @@ function buildContainerOptions(
       // `PidsLimit` stays: a fork bomb exhausts the host's process table
       // rather than this cgroup, which no memory figure would have bounded.
       PidsLimit: AGENT_PIDS_LIMIT,
+      // The agent's stdout is never written to disk.
+      //
+      // It is the model's raw working transcript over a client's private tree:
+      // whole files it read, their contents, its own reasoning. The host
+      // streams it live through `attach` for progress, and keeps a bounded
+      // tail in the pull request where the client already controls access —
+      // but a json-file on disk is a copy nobody asked for, sitting in the
+      // directory a log collector globs. It reached an external log service
+      // exactly once, which is how this line came to exist.
+      //
+      // Filtering it out downstream is a policy that can be got wrong; not
+      // writing it is a property that cannot. `attach` streams from the
+      // daemon and is unaffected by the log driver.
+      LogConfig: { Type: 'none', Config: {} },
       AutoRemove: false,
     },
   };

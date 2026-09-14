@@ -146,13 +146,25 @@ loki.process "lexi" {
   // `source` + `value` together mean "drop when this extracted field equals
   // this". Do not add `expression` as well — it is the other, mutually
   // exclusive, way to spell the same stage.
+  // A line filter, not a field comparison. `stage.drop` with source+value
+  // drops when the field EQUALS the value — and a line that is not ours has no
+  // `event` key at all, so the field is ABSENT, the stage skips, and the line
+  // survives. That distinction once put an agent's whole working transcript,
+  // including the contents of a client's private files, into an external log
+  // service. Matching the raw line has no absent case.
+  //
+  // Defence in depth only: agent containers are created with the `none` log
+  // driver (src/lib/runner/docker.ts), so their output is not on disk for this
+  // glob to find in the first place.
+  stage.match {
+    selector = "{job=\"lexi\"} !~ \".*\\\"event\\\":.*\""
+    action   = "drop"
+
+    drop_counter_reason = "not_a_lexi_event"
+  }
+
   stage.json {
     expressions = { ts = "ts", level = "level", event = "event" }
-  }
-  stage.drop {
-    source              = "event"
-    value               = ""
-    drop_counter_reason = "not_a_lexi_event"
   }
 
   // `slug` is already a target label from discovery.relabel above.

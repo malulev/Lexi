@@ -141,6 +141,10 @@ describe('container environment', () => {
     // Kept: a fork bomb exhausts the host's process table regardless of how
     // much memory any one run is allowed, which is a different failure.
     expect(host?.PidsLimit).toBe(512);
+    // The agent's stdout is the model's transcript over a client's private
+    // tree. Written to disk it becomes a copy in the directory a log
+    // collector globs — which is how it once reached an external log service.
+    expect(host?.LogConfig?.Type).toBe('none');
     // The existing narrowing must survive the change.
     expect(host?.CapDrop).toEqual(['ALL']);
     expect(host?.SecurityOpt).toEqual(['no-new-privileges']);
