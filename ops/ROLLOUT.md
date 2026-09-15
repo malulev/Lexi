@@ -380,7 +380,7 @@ instance to validate one against.
 | ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Clients up               | Stat                      | `lexi_client_app_up`                                                                                         |
 | Credentials valid        | Stat                      | `lexi_client_ready_ok`                                                                                       |
-| Memory headroom          | Time series, two series   | `node_memory_MemAvailable_bytes` and `lexi_agents_limit_total * 1073741824`                                  |
+| Memory headroom          | Time series, two series   | `node_memory_MemAvailable_bytes` and `lexi_agents_limit_total * 419430400` (the measured ~400 MB per agent, not the removed 1 GB cap)                                  |
 | Disk free                | Gauge                     | `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}`                   |
 | Requests by outcome      | Bar chart                 | `sum by (outcome) (count_over_time({job="lexi", event="request.ended"} \| json [1d]))`                       |
 | Failures by cause        | Table                     | `sum by (errorCode) (count_over_time({job="lexi", event="request.ended"} \| json \| outcome="failed" [7d]))` |

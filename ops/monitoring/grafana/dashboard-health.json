@@ -286,9 +286,9 @@
     },
     {
       "type": "timeseries",
-      "title": "Memory available vs summed agent ceiling",
+      "title": "Memory available vs projected agent demand",
       "id": 5,
-      "description": "No swap on this box. When the blue line crosses below the orange one, a concurrency spike is an OOM kill rather than a slow request.",
+      "description": "No swap on this box. The demand line is lexi_agents_limit_total (summed MAX_CONCURRENT_RUNS, 3 today) times the ~400 MB a measured agent run actually holds \u2014 not the 1 GB cap, which was removed from docker.ts because it never bound a real run. When available crosses below it, a concurrency spike is an OOM kill rather than a slow request.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -307,8 +307,8 @@
         },
         {
           "refId": "B",
-          "expr": "lexi_agents_limit_total{project=\"lexi\"} * 1073741824",
-          "legendFormat": "summed agent ceiling"
+          "expr": "lexi_agents_limit_total{project=\"lexi\"} * 419430400",
+          "legendFormat": "projected agent demand"
         }
       ],
       "fieldConfig": {
