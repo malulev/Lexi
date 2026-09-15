@@ -391,7 +391,7 @@ async function prepare(deps: RunDeps, input: RunInput, requestId: string): Promi
     request: input.message,
     history: input.history,
     guidance: deps.config.guidance,
-    allowedPaths: deps.config.policy.allow,
+    policy: deps.config.policy,
     ...(input.targetHint ? { targetHint: input.targetHint } : {}),
     ...(input.buildFailureDetail ? { buildFailureDetail: input.buildFailureDetail } : {}),
     ...(input.refusedPaths?.length ? { refusedPaths: input.refusedPaths } : {}),

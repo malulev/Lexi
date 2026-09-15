@@ -1,4 +1,4 @@
-import type { AgentPrompt, Message, MessageAuthor } from '@/types';
+import type { AgentPrompt, Message, MessageAuthor, Policy } from '@/types';
 
 /**
  * What the agent is told, and nothing more.
@@ -45,11 +45,16 @@ export interface PromptInput {
    */
   attachedPaths?: string[];
   /**
-   * The globs the policy allows the change to touch. Advisory (the gate is
-   * the control), but an agent that knows the boundary stops at it instead
-   * of spending eight minutes on a favicon the gate will refuse.
+   * Every rule the gate will judge the change by. Advisory (the gate is the
+   * control), but an agent that knows the boundary stops at it instead of
+   * spending eight minutes on a favicon the gate will refuse.
+   *
+   * The allow list alone used to be sent, which left the expensive failures
+   * unexplained: three conversations on one site were refused for
+   * `forbidExternalCode` after more than a million tokens, because nothing
+   * told the agent that re-adding an `<iframe>` line was a refusal.
    */
-  allowedPaths?: string[];
+  policy?: Policy;
 }
 
 export function assemblePrompt(input: PromptInput): AgentPrompt {
@@ -93,7 +98,7 @@ function renderTurn(message: Message): { author: MessageAuthor; text: string } {
 function composeRequest(input: PromptInput): string {
   const sections = [
     input.request.trim(),
-    allowedSection(input.allowedPaths),
+    policySection(input.policy),
     attachmentSection(input.attachedPaths),
     refusalSection(input.refusedPaths),
     buildFailureSection(input.buildFailureDetail),
@@ -101,16 +106,98 @@ function composeRequest(input: PromptInput): string {
   return sections.filter((section) => section !== null).join('\n\n');
 }
 
-function allowedSection(allowedPaths: string[] | undefined): string | null {
-  const globs = [...new Set(allowedPaths ?? [])].filter((glob) => glob.trim() !== '');
+/**
+ * Every limit the gate applies, as the agent needs to read them.
+ *
+ * The gate is all-or-nothing: one refused file discards the whole run, the
+ * compliant files with it. So the opening tells the agent to measure the
+ * request against these rules *before* editing and to stop rather than work —
+ * a refusal costs the client a full run either way, and the only thing worth
+ * saving is the spend.
+ *
+ * Only rules that actually bite are printed. A policy that allows everything
+ * says nothing about paths; one that permits external code says nothing about
+ * iframes. A prompt that lists inapplicable rules trains the agent to skim.
+ */
+function policySection(policy: Policy | undefined): string | null {
+  if (!policy) return null;
+
+  const rules = [
+    allowRule(policy.allow),
+    denyRule(policy.deny),
+    externalCodeRule(policy.forbidExternalCode),
+    dependencyRule(policy.forbidNewDependencies),
+    sizeRule(policy),
+    UNREACHABLE_RULE,
+  ].filter((rule) => rule !== null);
+
+  return [FAIL_FAST_PREAMBLE, ...rules].join('\n\n');
+}
+
+const FAIL_FAST_PREAMBLE =
+  'These limits are checked after you finish, and a change that breaks any of them ' +
+  'is refused whole — nothing at all is kept, not even the files that were fine. ' +
+  'Measure the request against them before you start. If it cannot be done within ' +
+  'them, stop without editing anything and say plainly what you could not do; if ' +
+  'only part of it fits, do that part and say what you left out.';
+
+/** Named in categories, not as the forty-odd globs of `UNCONDITIONAL_DENIES`: the shape is what the agent needs. */
+const UNREACHABLE_RULE =
+  'These are out of reach whatever the patterns above allow, and no request can ' +
+  'widen them: dependency manifests and lockfiles, CI workflows, hosting ' +
+  'configuration and serverless functions, .env files, shell scripts, build-time ' +
+  'config files, .webagent/ and AGENTS.md.';
+
+function allowRule(allow: string[]): string | null {
+  const globs = [...new Set(allow)].filter((glob) => glob.trim() !== '');
   if (globs.length === 0 || globs.includes('**')) return null;
 
   return [
-    'Only files matching these patterns may be created, edited or removed. Any change ' +
-      'outside them is refused and nothing at all is kept, so if the request needs a ' +
-      'file outside them, do the part that fits and say what you could not do.',
+    'Only files matching these patterns may be created, edited or removed:',
     ...globs.map((glob) => `- ${glob}`),
   ].join('\n');
+}
+
+function denyRule(deny: string[]): string | null {
+  const globs = [...new Set(deny)].filter((glob) => glob.trim() !== '');
+  if (globs.length === 0) return null;
+
+  return ['These may not be touched at all:', ...globs.map((glob) => `- ${glob}`)].join('\n');
+}
+
+/**
+ * Worth spelling the shapes out. The rule reads only *added* text, so a swap
+ * that keeps an embed's markup identical apart from its id still re-adds the
+ * line and is refused — the one thing an agent asked to "replace the second
+ * video" would never guess.
+ */
+function externalCodeRule(forbidExternalCode: boolean): string | null {
+  if (!forbidExternalCode) return null;
+
+  return (
+    'Do not add markup that makes a page load or run something from another ' +
+    'origin: <iframe>, <object>, <embed>, an off-site <script src=...>, <base>, ' +
+    '<meta http-equiv="refresh">, or a javascript: URL. This applies to an embed ' +
+    'already on the page too — editing its line counts as adding it, so a request ' +
+    "to swap one embed for another cannot be done this way. The site's own " +
+    'inline scripts and same-origin script files are fine.'
+  );
+}
+
+function dependencyRule(forbidNewDependencies: boolean): string | null {
+  if (!forbidNewDependencies) return null;
+
+  return (
+    'Do not add dependencies. Manifests and lockfiles are unreachable, and a ' +
+    'library copied straight into the tree (vendor/, node_modules/) is refused too.'
+  );
+}
+
+function sizeRule(policy: Policy): string {
+  return (
+    `Change at most ${policy.maxFilesChanged} files and ${policy.maxDiffLines} lines ` +
+    'in total, added and removed together.'
+  );
 }
 
 function attachmentSection(attachedPaths: string[] | undefined): string | null {
