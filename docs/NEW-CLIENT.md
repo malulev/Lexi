@@ -40,7 +40,7 @@ resumes. The manual steps, for reference or for doing one by hand:
 
 - [ ] `ops/provision-client.sh acme edit.acme.example 3001`
 - [ ] `sudoedit /srv/lexi/acme/.env`: GitHub App, Netlify, OpenRouter, SMTP, `ALLOWED_EMAILS`,
-      `PUBLIC_BASE_URL=https://edit.acme.example`, `MAX_CONCURRENT_RUNS` sized to the box.
+      `PUBLIC_BASE_URL=https://edit.acme.example`.
 - [ ] Run `gen:secrets` as the client user (the provision script prints the command; no password). Never `PORT`, only `PORT_HOST`.
 - [ ] Run `check:env` the same way. It names missing variables and prints no values.
 - [ ] DNS: A record (and AAAA if applicable) for `edit.acme.example` pointing at the VPS public IP. Wait until it resolves.

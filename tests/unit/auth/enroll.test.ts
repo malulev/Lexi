@@ -26,7 +26,6 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtps://user:pass@smtp.example.com:465',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'https://edit.client.example',
-    maxConcurrentRuns: 2,
     ...overrides,
   };
 }

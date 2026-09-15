@@ -37,7 +37,6 @@ const ENV: Env = {
   smtpUrl: 'smtp://localhost:1025',
   smtpFrom: 'no-reply@example.com',
   publicBaseUrl: 'https://client.example.com',
-  maxConcurrentRuns: 2,
 };
 
 /** A conversation carrying one publication record, as the approve route leaves it. */

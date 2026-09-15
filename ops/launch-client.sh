@@ -45,8 +45,6 @@ Options:
                           instead of opening an editor. The file is read once
                           and never copied anywhere. Use it from automation;
                           by hand, the editor is safer.
-  --runs <n>              MAX_CONCURRENT_RUNS for this client (default: leave
-                          the skeleton's value). About 1 GB of RAM each.
   --dns-timeout <sec>     How long to wait for DNS to resolve here (default 900).
                           0 waits forever.
   --skip-dns              Do not check DNS. Caddy will retry certificate issuance
@@ -69,7 +67,6 @@ DNS_TIMEOUT=900
 SKIP_DNS=0
 NO_PROXY=0
 VALUES_FILE=""
-RUNS=""
 SLUG=""
 HOSTNAME_ARG=""
 PORT=""
@@ -106,11 +103,6 @@ parse_args() {
       --values)
         [ $# -ge 2 ] || die "--values needs a file"
         VALUES_FILE="$2"
-        shift 2
-        ;;
-      --runs)
-        [ $# -ge 2 ] || die "--runs needs a number"
-        RUNS="$2"
         shift 2
         ;;
       --dns-timeout)
@@ -167,10 +159,6 @@ validate_args() {
   fi
   case "$DNS_TIMEOUT" in '' | *[!0-9]*) die "--dns-timeout must be a whole number of seconds" ;; esac
   case "$REGISTRY_PORT" in '' | *[!0-9]*) die "--registry-port must be a whole number" ;; esac
-  if [ -n "$RUNS" ]; then
-    case "$RUNS" in '' | *[!0-9]*) die "--runs must be a whole number" ;; esac
-    [ "$RUNS" -ge 1 ] || die "--runs must be at least 1"
-  fi
   if [ -n "$VALUES_FILE" ]; then
     [ -f "$VALUES_FILE" ] || die "--values file not found: ${VALUES_FILE}"
   fi
@@ -355,10 +343,6 @@ step_fill_env() {
 
   if [ -n "$VALUES_FILE" ]; then
     merge_values_file "$env_file"
-  fi
-  if [ -n "$RUNS" ]; then
-    set_env_value "$env_file" MAX_CONCURRENT_RUNS "$RUNS"
-    note "MAX_CONCURRENT_RUNS=${RUNS}"
   fi
 
   missing="$(missing_by_hand "$env_file")"

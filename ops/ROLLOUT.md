@@ -38,11 +38,13 @@ though it briefly recreates the image registry container) or does this by hand:
 ```bash
 ssh root@<host>
 
-# Swap. Agent containers are capped at 1 GiB each, but the ceiling is the SUM
-# of every client's MAX_CONCURRENT_RUNS — 3 GB here against 3819 MB of RAM. With
-# no swap the kernel resolves that by killing something, and it picks by size,
-# so it can take Caddy or another client's app rather than the run that caused
-# it. Swap turns the overshoot into slowness, which is recoverable.
+# Swap. Every client can run one agent at a time (~400 MB each, measured) and
+# nothing in the product admits across clients, so the ceiling is the client
+# count. With no swap the kernel resolves an overshoot by killing something,
+# and it picks by size. Swap turns that into slowness. Optional: a stress test
+# on 2026-09-14 recovered in a minute precisely because there was no swap to
+# thrash through, and the lease daemon (see the admission-queue design) is the
+# real fix; add swap only if you would rather have slow than killed meanwhile.
 fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
 echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
@@ -185,8 +187,8 @@ cat /var/lib/node_exporter/textfile/lexi.prom | head -20
 ```
 
 You should see `lexi_client_app_up`, `lexi_client_ready_ok`, and
-`lexi_agents_limit_total` — the summed concurrency ceiling across clients,
-which nothing in the product can see.
+`lexi_clients_total` — the host's agent ceiling (each client can run one at a
+time), which nothing in the product can see.
 
 **Then prove the alert actually fires:**
 
@@ -254,7 +256,7 @@ journalctl -u alloy -n 30 --no-pager
 systemctl show alloy -p MemoryCurrent      # should stay well under 200M
 ```
 
-In Grafana, query `lexi_agents_limit_total` and
+In Grafana, query `lexi_clients_total` and
 `{job="lexi"} | json | event="request.ended"`.
 
 **Before you consider this step done, confirm no agent output is reaching
@@ -358,7 +360,7 @@ Click any line to expand the parsed fields — `costUsd`, `durationMs`,
 ```promql
 lexi_client_app_up                                  # 1 or 0 per client
 lexi_client_ready_ok                                # credentials still valid
-lexi_agents_limit_total                             # summed concurrency ceiling
+lexi_clients_total                                  # agent ceiling: one per client
 node_memory_MemAvailable_bytes{project="lexi"}      # against the line above
 node_filesystem_avail_bytes{project="lexi",mountpoint="/"}
 lexi_client_info                                    # deployed image and commit
@@ -380,7 +382,7 @@ instance to validate one against.
 | ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | Clients up               | Stat                      | `lexi_client_app_up`                                                                                         |
 | Credentials valid        | Stat                      | `lexi_client_ready_ok`                                                                                       |
-| Memory headroom          | Time series, two series   | `node_memory_MemAvailable_bytes` and `lexi_agents_limit_total * 419430400` (the measured ~400 MB per agent, not the removed 1 GB cap)                                  |
+| Memory headroom          | Time series, two series   | `node_memory_MemAvailable_bytes` and `lexi_clients_total * 419430400` (every client running one agent at the measured ~400 MB each)                                    |
 | Disk free                | Gauge                     | `node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}`                   |
 | Requests by outcome      | Bar chart                 | `sum by (outcome) (count_over_time({job="lexi", event="request.ended"} \| json [1d]))`                       |
 | Failures by cause        | Table                     | `sum by (errorCode) (count_over_time({job="lexi", event="request.ended"} \| json \| outcome="failed" [7d]))` |

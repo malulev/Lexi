@@ -232,7 +232,7 @@ describe('renderRecord and parseComment are inverses (property test, T029)', () 
         { stage: 'failed', at: '2026-09-04T10:15:00.000Z' },
       ],
       errorCode: 'too_busy',
-      errorDetail: 'no agent slot became free within 15 minutes (MAX_CONCURRENT_RUNS=2)',
+      errorDetail: 'no agent slot became free within 15 minutes',
     };
     const rendered = renderRecord('prose', record);
     const parsed = parseComment({

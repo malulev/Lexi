@@ -9,9 +9,9 @@ import { AGENT_LABEL } from '@/lib/runner/slots';
 import { createFakeDocker } from './fake-docker';
 
 /**
- * The slot count (slots.ts) is only as good as the label it counts. A
- * container created without it is invisible to every other installation on
- * the host, so the label is asserted where the container is specified.
+ * The host's running-agent metric (ops/status.sh) is only as good as the
+ * label it counts. A container created without it is invisible to the
+ * operator, so the label is asserted where the container is specified.
  */
 
 const dirs: string[] = [];

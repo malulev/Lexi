@@ -40,7 +40,7 @@ prometheus.exporter.unix "host" {
 
   textfile {
     // Written by ops/probe.sh: the per-client facts no generic exporter knows,
-    // including lexi_agents_limit_total.
+    // including lexi_clients_total, the host's agent ceiling.
     directory = "/var/lib/node_exporter/textfile"
   }
 }

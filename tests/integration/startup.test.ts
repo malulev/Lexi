@@ -37,7 +37,6 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
     smtpUrl: 'smtp://localhost:1025',
     smtpFrom: 'webagent@client.example',
     publicBaseUrl: 'http://localhost:3000',
-    maxConcurrentRuns: 2,
     ...overrides,
   };
 }

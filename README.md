@@ -113,10 +113,6 @@ Fill in the rest by hand: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_INS
 # Who may sign in. Deployment configuration, never repository configuration:
 # write access to the client's repository must not confer access to the editor.
 ALLOWED_EMAILS=jane@client.example,marketing@client.example
-
-# Optional. How many agent containers may run at once, ~1 GB of RAM each.
-# A request arriving at the limit waits its turn, then gives up after 15 minutes.
-MAX_CONCURRENT_RUNS=2
 ```
 
 The private key can be pasted with literal `\n` or wrapped in double quotes across several lines;
@@ -347,9 +343,12 @@ whoever owns it, so a compromise reaches one unprivileged client user rather tha
 socket proxy is not an alternative — it filters paths, not request bodies, and the runner needs
 `POST /containers/create`, whose body carries the bind mounts.)
 
-Sizing: ~1 GB of RAM per concurrent agent run plus ~250 MB per idle installation, so 4 GB carries
-a handful of clients and 16 GB carries 20–25. Allow ~10 GB of disk per client, plus ~1.2 GB of
-images per client — each rootless daemon keeps its own image store.
+Sizing: ~400 MB of RAM per running agent (measured) plus ~160 MB per idle installation. Each
+client runs at most one agent at a time, and today nothing admits across clients, so budget for
+every client running one at once: 4 GB carries four or five clients, 16 GB carries 20–25. The
+host-wide queue that lifts that constraint is designed in
+`docs/superpowers/specs/2026-09-14-host-admission-queue-design.md`. Allow ~10 GB of disk per
+client, plus ~1.2 GB of images per client — each rootless daemon keeps its own image store.
 
 ### Once per host
 
@@ -405,8 +404,9 @@ broken as stale.
 - **`/srv/lexi/<slug>` and its `state/` stay 0700.** They are the containment. Each per-request
   working tree is made writable by the agent container's foreign uid, which is safe precisely
   because nothing outside that installation can traverse the directory holding it.
-- **`MAX_CONCURRENT_RUNS` is per client here, not host-wide.** Each client has its own daemon, so
-  the host total is the sum across installations.
+- **Each client runs one agent at a time; the host runs up to one per client.** The site lock
+  bounds an installation, and nothing bounds the host across installations yet, so the client
+  count is the host's agent ceiling. `ops/status.sh` reports it as `lexi_clients_total`.
 - **Set `PORT_HOST`, never `PORT`.** `.env` is both interpolated by Compose and passed into the
   container, where Next reads `PORT` as its listen port. Give each client a distinct `PORT_HOST`,
   bound to loopback, behind the reverse proxy.
