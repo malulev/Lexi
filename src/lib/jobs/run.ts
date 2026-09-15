@@ -180,6 +180,10 @@ async function execute(
 
   let tree: WorkingTree | null = null;
   let controlDir: string | null = null;
+  // Held for the agent's whole run and given back in `finally`, whatever the
+  // ending: a slot released anywhere else leaks host capacity on the failure
+  // paths, and leaked capacity is a host that quietly stops admitting anyone.
+  let slot: SlotOutcome | null = null;
   // Chosen once, here, so the container and the record cannot disagree about
   // which model a request ran on.
   const model = resolveModel(deps.config.settings, input.modelTier);
@@ -192,7 +196,7 @@ async function execute(
     tree = prepared.tree;
     controlDir = prepared.controlDir;
 
-    const slot = await waitForSlot(deps, machine, requestId);
+    slot = await waitForSlot(deps, machine, requestId);
     if (!slot.ok) {
       return finish(deps, input, machine, {
         requestId,
@@ -200,13 +204,15 @@ async function execute(
         model,
         outcome: 'failed',
         errorCode: 'too_busy',
-        errorDetail: `no agent slot became free within ${Math.round(slot.waitedMs / 60_000)} minutes (MAX_CONCURRENT_RUNS=${deps.env.maxConcurrentRuns})`,
+        errorDetail: slot.reason
+          ? `the host refused an agent slot: ${slot.reason}`
+          : `no agent slot became free within ${Math.round(slot.waitedMs / 60_000)} minutes`,
         prose: null,
       });
     }
 
     machine.advance('running');
-    const agent = await runAgent(deps, requestId, prepared, model);
+    const agent = await runAgent(deps, requestId, prepared, model, slot.memoryBytes);
     if (agent.failure) {
       if (isProviderLimit(agent.failure.errorCode)) {
         await alertProviderLimit(deps, input, agent.failure.errorCode, agent.failure.errorDetail);
@@ -283,6 +289,7 @@ async function execute(
   } finally {
     await discard(tree, controlDir);
     await discardAttachments(input.attachments);
+    if (slot?.ok) await slot.release();
     await handle.release();
 
     if (!reachedTerminal) {
@@ -309,8 +316,8 @@ async function waitForSlot(
   machine: { advance(stage: 'queued'): void },
   requestId: string,
 ): Promise<SlotOutcome> {
-  if (!deps.slots) return { ok: true, waitedMs: 0 };
-  const outcome = await deps.slots.acquire({ onWait: () => machine.advance('queued') });
+  if (!deps.slots) return { ok: true, waitedMs: 0, release: async () => {} };
+  const outcome = await deps.slots.acquire({ onWait: () => machine.advance('queued'), requestId });
   // Only when it actually waited. A line per request that walked straight in
   // would be one line per request saying nothing.
   if (outcome.waitedMs > 0) {
@@ -318,7 +325,7 @@ async function waitForSlot(
       requestId,
       waitedMs: outcome.waitedMs,
       granted: outcome.ok,
-      limit: deps.env.maxConcurrentRuns,
+      ...(outcome.ok ? {} : { reason: outcome.reason ?? 'timeout' }),
     });
   }
   return outcome;
@@ -401,6 +408,7 @@ async function runAgent(
   requestId: string,
   prepared: Prepared,
   model: string,
+  memoryBytes?: number,
 ): Promise<AgentPass> {
   const timeoutMs = deps.config.settings.maxRequestMinutes * 60_000;
   // The agent's own output is otherwise ephemeral — streamed to the browser and
@@ -414,6 +422,7 @@ async function runAgent(
     prompt: prepared.prompt,
     model,
     timeoutMs,
+    memoryBytes,
     onOutput: (text) => {
       outputTail.push(text);
       if (outputTail.length > AGENT_OUTPUT_TAIL_LINES) outputTail.shift();
@@ -744,7 +753,7 @@ export const DEFAULT_ERROR_DETAIL: Record<ErrorCode, string> = {
     'the default branch and the change touch the same lines, so bringing the change up to date needs a person',
   site_unreachable: 'the hosting provider reported no deploy for this branch within the wait',
   request_in_flight: 'another request held the installation lock',
-  too_busy: 'no agent slot became free on this host within the queue wait (MAX_CONCURRENT_RUNS)',
+  too_busy: 'no agent slot became free on this host within the queue wait',
   blocked_by_policy: 'the change touched a path the policy does not permit',
   out_of_date: 'the branch moved under the request between reading and pushing',
   build_failed: 'the hosting provider reported a failed build',

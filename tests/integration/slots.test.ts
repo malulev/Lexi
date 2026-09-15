@@ -58,7 +58,7 @@ function slotsThatQueueOnce(): AgentSlots & { readonly waits: number } {
     async acquire(options) {
       waits += 1;
       options?.onWait?.();
-      return { ok: true, waitedMs: 0 };
+      return { ok: true, waitedMs: 0, release: async () => {} };
     },
   };
 }
@@ -69,6 +69,35 @@ const slotsThatNeverFree: AgentSlots = {
     return { ok: false, waitedMs: 15 * 60_000 };
   },
 };
+
+const slotsThatRefuse: AgentSlots = {
+  async acquire() {
+    return { ok: false, waitedMs: 40, reason: 'projected_wait_exceeds_ceiling' };
+  },
+};
+
+/** Slots that count releases and hand the run a memory cap, like a lease daemon would. */
+function slotsThatLease(): AgentSlots & { readonly releases: number; readonly requestIds: string[] } {
+  let releases = 0;
+  const requestIds: string[] = [];
+  return {
+    get releases() {
+      return releases;
+    },
+    requestIds,
+    async acquire(options) {
+      if (options?.requestId) requestIds.push(options.requestId);
+      return {
+        ok: true,
+        waitedMs: 0,
+        memoryBytes: 838_860_800,
+        release: async () => {
+          releases += 1;
+        },
+      };
+    },
+  };
+}
 
 function stagesSeen(events: JobEvent[]): string[] {
   return events.flatMap((event) => (event.type === 'stage' ? [event.stage] : []));
@@ -146,5 +175,66 @@ describe('a request on a full host', () => {
     // empty history that never ran anything at all.
     expect(stages).toContain('running');
     expect(stages).not.toContain('queued');
+  });
+});
+
+describe('a leased slot', () => {
+  it('is released exactly once when the request succeeds, and the run gets the memory cap', async () => {
+    const slots = slotsThatLease();
+    harness = await createHarness({ script: editsTheHomepage, slots, previewTimeoutMs: 500 });
+    const pullRequest = await openConversation(harness.client);
+
+    const begun = await beginRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Shorten the headline',
+      history: [],
+    });
+    if (!begun.started) throw new Error('the request should have started');
+    await begun.completed;
+
+    expect(slots.releases).toBe(1);
+    expect(slots.requestIds).toEqual([begun.requestId]);
+    expect(harness.runner.calls[0]?.memoryBytes).toBe(838_860_800);
+  });
+
+  it('is released exactly once when the agent fails', async () => {
+    const slots = slotsThatLease();
+    harness = await createHarness({ script: { outcome: 'completed', exitCode: 1 }, slots });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Shorten the headline',
+      history: [],
+    });
+
+    expect(outcome.started && outcome.outcome).toBe('failed');
+    expect(slots.releases).toBe(1);
+  });
+
+  it("records the daemon's reason when refused, while the client sees the busy sentence", async () => {
+    harness = await createHarness({ script: editsTheHomepage, slots: slotsThatRefuse });
+    const pullRequest = await openConversation(harness.client);
+
+    const outcome = await runRequest(harness.deps, {
+      conversationNumber: pullRequest.number,
+      branch: pullRequest.headRef,
+      baseBranch: 'main',
+      message: 'Shorten the headline',
+      history: [],
+    });
+
+    expect(outcome.started && outcome.outcome).toBe('failed');
+    expect(harness.runner.calls).toHaveLength(0);
+    const parsed = parseComment((await harness.client.listComments(pullRequest.number)).at(-1)!);
+    expect(parsed.record?.errorCode).toBe('too_busy');
+    expect(parsed.record?.errorDetail).toBe('the host refused an agent slot: projected_wait_exceeds_ceiling');
+    expect(parsed.prose).toBe(CLIENT_MESSAGES.too_busy);
+    // No queued stage: a refusal is immediate.
+    expect(parsed.record?.stages.map((event) => event.stage)).toEqual(['failed']);
   });
 });

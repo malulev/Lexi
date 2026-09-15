@@ -18,6 +18,11 @@ export interface RunRequest {
   prompt: AgentPrompt;
   model: string;
   timeoutMs: number;
+  /**
+   * Memory cap for the container, when the host that admitted this run set
+   * one (the lease daemon hands it over with the grant). Absent, no cap.
+   */
+  memoryBytes?: number;
   /** Called for each line of container stdout. Best effort; may be dropped. */
   onOutput?: (line: string) => void;
 }

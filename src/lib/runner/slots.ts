@@ -1,27 +1,27 @@
-import type Docker from 'dockerode';
-import { log } from '@/lib/log';
-
 /**
- * Host-wide agent slots, with the Docker daemon as the semaphore.
+ * Admission to the host's agent capacity.
  *
- * Several installations may share one machine, and with it one daemon. Each
- * has its own lock (one request per site), but nothing stops four sites from
- * starting four agents into 4 GB of RAM at once. Rather than a broker or a
- * shared lock file, the daemon itself is asked how many agent containers are
- * running: every one carries `AGENT_LABEL`, and a container that died is
- * simply no longer listed, so there is no stale state to reason about.
+ * `run.ts` asks for a slot before it starts an agent and announces `queued`
+ * only to a request that actually had to wait. What grants the slot is behind
+ * this interface so the orchestrator never learns how the host is shared.
  *
- * This is a check-then-act race, not a semaphore: every waiter whose poll
- * lands between a slot freeing and the first waiter's `createContainer`
- * observes the same free slot and also proceeds, so the overshoot is bounded
- * by the number of concurrent waiters, not by one. Poll jitter (below) keeps
- * waiters from polling in lockstep, which narrows that window but does not
- * close it. Per-container memory and CPU caps that would make an overshoot
- * harmless are a planned follow-up, not something this module relies on
- * today. An exact semaphore would need shared state this product
- * deliberately does not have (constitution VII).
+ * There is no host-wide implementation yet. This module once counted agent
+ * containers on the installation's Docker daemon and called that count
+ * host-wide, which was true only while every installation shared one daemon.
+ * Under the one-daemon-per-client topology the count was per client — and
+ * since each installation serves one site and the site lock already bounds
+ * it to one run at a time, that count never bound anything. It was removed on
+ * 2026-09-15 rather than kept as false comfort. Cross-installation admission
+ * is the lease daemon designed in
+ * docs/superpowers/specs/2026-09-14-host-admission-queue-design.md, which
+ * implements this same interface.
  */
 
+/**
+ * Every agent container carries this label. `ops/status.sh` counts running
+ * containers by it for the host's `lexi_agents_running_total` metric, and a
+ * developer reading `docker ps` can tell an agent from anything else.
+ */
 export const AGENT_LABEL = 'webagent.agent';
 
 /**
@@ -31,96 +31,27 @@ export const AGENT_LABEL = 'webagent.agent';
  * was invisible until it became an outright refusal — the one point at which
  * it is too late to act on. A request that waited eight minutes and then ran
  * is the early warning.
+ *
+ * A granted slot carries `release`, because a lease held by an open socket
+ * has to be given back; `memoryBytes` is the cap the host wants on this run,
+ * when the host has an opinion. A refusal may carry the host's `reason`,
+ * which goes into the durable record and never into client prose.
  */
-export type SlotOutcome = { ok: true; waitedMs: number } | { ok: false; waitedMs: number };
+export type SlotOutcome =
+  | { ok: true; waitedMs: number; memoryBytes?: number; release(): Promise<void> }
+  | { ok: false; waitedMs: number; reason?: string };
 
 export interface AgentSlots {
   /**
-   * Resolves once fewer than the limit are running. `onWait` fires once, the
-   * first time the caller actually has to wait, so the orchestrator can
-   * announce a `queued` stage only to a request that queued.
+   * Resolves once the host has room. `onWait` fires once, the first time the
+   * caller actually has to wait, so the orchestrator can announce a `queued`
+   * stage only to a request that queued. `requestId` is for correlating the
+   * host's log with this installation's; nothing is decided on it.
    */
-  acquire(options?: { onWait?: () => void }): Promise<SlotOutcome>;
+  acquire(options?: { onWait?: () => void; requestId?: string }): Promise<SlotOutcome>;
 }
 
-/** For tests and single-site development: every request runs at once. */
+/** No admission control: every request runs at once, and there is nothing to give back. */
 export const UNLIMITED_SLOTS: AgentSlots = {
-  acquire: async () => ({ ok: true, waitedMs: 0 }),
+  acquire: async () => ({ ok: true, waitedMs: 0, release: async () => {} }),
 };
-
-export interface CreateDockerSlotsOptions {
-  docker: Pick<Docker, 'listContainers'>;
-  limit: number;
-  pollMs?: number;
-  maxWaitMs?: number;
-  now?: () => number;
-  sleep?: (ms: number) => Promise<void>;
-  /** Source of the jitter unit in `[0, 1)`. Injectable so tests stay deterministic. */
-  random?: () => number;
-}
-
-const DEFAULT_POLL_MS = 3_000;
-const DEFAULT_MAX_WAIT_MS = 15 * 60_000;
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function pause(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Spreads waiters out between 75% and 125% of the poll interval so several hosts' worth of installations do not poll in lockstep. */
-function jitteredPoll(pollMs: number, unit: number): number {
-  return Math.round(pollMs * (0.75 + unit * 0.5));
-}
-
-/**
- * Running containers carrying the agent label. A daemon that cannot answer
- * counts as empty: refusing every request because the count failed would
- * turn a monitoring fault into an outage, and the runner's own
- * `createContainer` reports a dead daemon properly a moment later.
- */
-export async function countRunningAgents(docker: Pick<Docker, 'listContainers'>): Promise<number> {
-  try {
-    const containers = await docker.listContainers({
-      filters: { label: [`${AGENT_LABEL}=true`] },
-    });
-    return containers.length;
-  } catch (error) {
-    // Worth an event of its own: returning 0 here means the concurrency cap
-    // has silently stopped existing, which is the precondition for the host
-    // running out of memory ten minutes later.
-    log.error('slots.count_failed', { error: describe(error) });
-    return 0;
-  }
-}
-
-export function createDockerSlots(options: CreateDockerSlotsOptions): AgentSlots {
-  const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
-  const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
-  const now = options.now ?? Date.now;
-  const sleep = options.sleep ?? pause;
-  const random = options.random ?? Math.random;
-
-  async function acquire(acquireOptions: { onWait?: () => void } = {}): Promise<SlotOutcome> {
-    const startedAt = now();
-    let announced = false;
-
-    for (;;) {
-      const running = await countRunningAgents(options.docker);
-      if (running < options.limit) return { ok: true, waitedMs: now() - startedAt };
-
-      const waitedMs = now() - startedAt;
-      if (waitedMs >= maxWaitMs) return { ok: false, waitedMs };
-
-      if (!announced) {
-        announced = true;
-        acquireOptions.onWait?.();
-      }
-      await sleep(jitteredPoll(pollMs, random()));
-    }
-  }
-
-  return { acquire };
-}
