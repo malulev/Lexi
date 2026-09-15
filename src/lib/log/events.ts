@@ -19,6 +19,9 @@ export type LogEvent =
   // Capacity.
   | 'slot.waited'
   | 'slots.count_failed'
+  // The admission daemon could not be reached or stopped answering; the
+  // request ran under the fallback. Protection degraded, availability kept.
+  | 'slots.broker_unavailable'
   // Boot and continuous readiness.
   | 'startup.ok'
   | 'startup.refused'
