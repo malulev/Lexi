@@ -1,9 +1,12 @@
 import {
   ATTACHMENT_REFUSALS,
+  ERROR_HELP,
   BRINGING_UP_TO_DATE,
   CLIENT_MESSAGES,
   INTERRUPTED_MESSAGE,
   PUBLICATION_IN_PROGRESS,
+  PUBLISH_REFUSALS,
+  UNDO_REFUSALS,
 } from '@/lib/jobs/messages';
 import { MODEL_TIER_LABELS } from '@/lib/models';
 import type { Dictionary } from './types';
@@ -63,6 +66,7 @@ export const en: Dictionary = {
     previewReady: 'A preview is ready.',
     madeWith: 'Made with {model}',
     costOf: 'cost {cost}',
+    why: 'Why did this happen?',
   },
   preview: {
     ariaLabel: 'Preview',
@@ -224,6 +228,9 @@ export const en: Dictionary = {
   },
   tiers: MODEL_TIER_LABELS,
   errors: CLIENT_MESSAGES,
+  errorHelp: ERROR_HELP,
+  publishRefusals: PUBLISH_REFUSALS,
+  undoRefusals: UNDO_REFUSALS,
   attachmentRefusals: ATTACHMENT_REFUSALS,
   interrupted: INTERRUPTED_MESSAGE,
   publicationInProgress: PUBLICATION_IN_PROGRESS,

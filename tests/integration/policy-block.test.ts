@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { simpleGit } from 'simple-git';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { claimConversationBranch } from '@/lib/conversations';
 import { runRequest } from '@/lib/jobs/run';
@@ -67,7 +67,10 @@ function withPolicy(overrides: Partial<RepoConfig['policy']>): RepoConfig {
 /** Every path in the pushed commit, so a test can name what did *not* get in. */
 async function pushedPaths(originDir: string, branch: string): Promise<string[]> {
   const listing = await simpleGit(originDir).raw(['show', '--name-only', '--format=', branch]);
-  return listing.split('\n').map((line) => line.trim()).filter((line) => line !== '');
+  return listing
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
 }
 
 async function sendRequest(harnessed: Harness, number: number, branch: string, message: string) {
@@ -124,6 +127,46 @@ describe('a change the site policy does not permit', () => {
     // surface, and nowhere in the sentence the client reads.
     expect(parsed.prose).toBe(CLIENT_MESSAGES.blocked_by_policy);
     expect(parsed.prose).not.toContain('README');
+  });
+
+  it('logs every path the change touched, not only the one that stopped it', async () => {
+    harness = await createHarness({
+      script: writesFiles({
+        'README.md': '# rewritten by the agent\n',
+        'index.html': '<p>a permitted edit, in the same change</p>\n',
+      }),
+    });
+    const pullRequest = await openConversation(harness.client);
+
+    const written: string[] = [];
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      await sendRequest(harness, pullRequest.number, pullRequest.headRef, 'Rewrite the readme');
+    } finally {
+      stdout.mockRestore();
+    }
+
+    const blocked = written
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as Record<string, unknown>];
+        } catch {
+          return [];
+        }
+      })
+      .find((line) => line.event === 'request.blocked');
+
+    // The record names the first offender and stops. Diagnosing a refusal —
+    // "is the allow list too narrow, or did the agent wander?" — needs the
+    // whole set, and the record is not the place to put it.
+    expect(blocked, 'a blocked request must emit request.blocked').toBeDefined();
+    expect(blocked?.violation).toBe('not_allowed_path');
+    expect(blocked?.blockedPath).toBe('README.md');
+    expect(blocked?.attemptedCount).toBe(2);
+    expect(blocked?.attemptedPaths).toEqual(expect.arrayContaining(['README.md', 'index.html']));
   });
 
   it('leaves the next request free to succeed, so one refusal does not end the conversation', async () => {

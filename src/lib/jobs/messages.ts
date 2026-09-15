@@ -92,6 +92,8 @@ export const PUBLISH_REFUSALS = {
   unavailable: 'This conversation is finished, so there is nothing to publish.',
 } as const;
 
+export type PublishRefusal = keyof typeof PUBLISH_REFUSALS;
+
 export const UNDO_REFUSALS = {
   not_previewed: 'Nothing from this conversation has been published, so there is nothing to undo.',
   ready: 'This change has not been published yet, so there is nothing to undo.',
@@ -99,12 +101,71 @@ export const UNDO_REFUSALS = {
   unavailable: 'Nothing from this conversation is live, so there is nothing to undo.',
 } as const;
 
+export type UndoRefusal = keyof typeof UNDO_REFUSALS;
+
 /**
  * Why the buttons are resting while a publish or an undo is being built.
  * `request_in_flight` says a *change* is being applied, which would be the
  * wrong sentence here: nothing is being changed, the site is being built.
  */
 export const PUBLICATION_IN_PROGRESS = 'Your website is being built — one moment.';
+
+/**
+ * The longer answer, behind the question mark beside a setback.
+ *
+ * `CLIENT_MESSAGES` has one job: say what happened, in a breath, in under 120
+ * characters. That leaves no room for the question a person actually has next
+ * — *why did that happen, and what do I do now* — and the old answer was that
+ * they asked their developer.
+ *
+ * So these are a second register, not a longer version of the first. Each one
+ * says what the limit is *for*, and what the client can do about it, ending
+ * either with an action they can take or with the honest statement that this
+ * one is their developer's to fix.
+ *
+ * Principle I still governs every word: no path, no git vocabulary, no build
+ * log, no figure from the implementation. `tests/unit/messages.test.ts` audits
+ * this table with the same patterns it applies to the short ones, at a length
+ * that allows two sentences instead of one.
+ */
+export const ERROR_HELP: Record<ErrorCode, string> = {
+  blocked_by_policy:
+    'Your developer chose which parts of this site can be changed from here, and this change reached past them. Ask them to open up the part you need.',
+  request_in_flight:
+    'One change at a time runs on a site, so two of them can never overwrite each other. Yours will start as soon as the one ahead of it finishes.',
+  too_busy:
+    'More changes were asked for at once than this site is set up to handle. Nothing was lost — send the same thing again in a few minutes.',
+  agent_timeout:
+    'Every change has a time limit, so one that gets stuck cannot run forever. Asking for one thing at a time is usually enough to get through it.',
+  build_failed:
+    'Your website is rebuilt from scratch after every change, and this one stopped it from rebuilding. Nothing reached the live site, so it is safe to try again.',
+  site_unreachable:
+    'The service that puts your website online is not answering right now. That is outside your site and usually clears by itself within a few minutes.',
+  cost_ceiling:
+    'Each change has a spending limit that your developer set for this site. Asking for something smaller, or splitting it in two, will stay inside it.',
+  out_of_date:
+    'Your website changed while this was being saved, so saving it now would undo that. Ask for the same thing again and it will start from how the site looks now.',
+  nothing_to_change:
+    'I looked at your site and it already reads the way you asked for, so there was nothing to alter. If you meant somewhere else, say which part.',
+  nothing_to_publish:
+    'Only a change with a preview you have approved can go live. Wait for the preview to appear, look at it, then approve it.',
+  nothing_to_undo:
+    'Undo only applies to a change that went live from this conversation. Nothing from this one has, so there is nothing to take back.',
+  site_moved_on:
+    'Other changes went live after this one did. Undoing this now would take those down with it, so it is not offered.',
+  site_conflict:
+    'Another change has since altered the same part of your site. Ask for what you want again and it will start from what is there now.',
+  model_quota:
+    'The writing service this site uses has a daily allowance, and today’s is spent. It starts again tomorrow, and nothing you sent was lost.',
+  model_credit:
+    'The account behind the writing service has run out of credit. Only your developer can add more, so this one is worth telling them about.',
+  model_unavailable:
+    'The writing service is not responding at the moment. Nothing is wrong with your website, and it usually comes back within a few minutes.',
+  hosting_limit:
+    'The plan your website is hosted on limits how often it can be rebuilt, and that limit is reached. Your developer can raise it.',
+  internal_error:
+    'Something failed inside the editor rather than in what you asked for, so your website was not touched. Try once more, and tell your developer if it keeps happening.',
+};
 
 /** Every sentence a client can be shown when something does not go ahead. */
 export const CLIENT_PROSE: readonly string[] = [

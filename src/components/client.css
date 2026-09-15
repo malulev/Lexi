@@ -602,6 +602,54 @@
   font-size: 0.66rem;
 }
 
+/* The question mark beside a setback, and what it opens.                  */
+
+.message__help {
+  margin-top: 0.4rem;
+}
+
+.message__help-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A 16px mark inside a 24px target: small enough not to compete with the
+     sentence, large enough to press on a phone. */
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.message__help-toggle:hover,
+.message__help-toggle:focus-visible {
+  color: var(--fg);
+  border-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+.message__help-toggle[aria-expanded='true'] {
+  color: var(--fg);
+  border-color: currentColor;
+}
+
+.message__help-text {
+  /* Logical properties throughout, so the rule that indents this under the
+     question mark in English mirrors itself in Hebrew with no second rule. */
+  margin: 0.45rem 0 0;
+  padding-inline-start: 0.6rem;
+  border-inline-start: 2px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
 .message__time {
   display: block;
   margin-top: 0.3rem;

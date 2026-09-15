@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ATTACHMENT_REFUSALS,
+  ERROR_HELP,
   BRINGING_UP_TO_DATE,
   CLIENT_MESSAGES,
   CLIENT_PROSE,
@@ -148,6 +149,52 @@ describe('every sentence a client can be shown', () => {
       expect(sentence, sentence).toMatch(/[.!?]$/);
       expect(sentence[0], sentence).toEqual(sentence[0]?.toUpperCase());
       expect(sentence.length, sentence).toBeLessThan(160);
+    }
+  });
+});
+
+/**
+ * The help text is a second register, not a second vocabulary: it answers
+ * "why, and what now" where the short message answers "what happened". Every
+ * Principle I rule still applies — it just gets two sentences to do it in.
+ */
+describe('the help behind the question mark', () => {
+  const help = Object.entries(ERROR_HELP) as Array<[ErrorCode, string]>;
+
+  it('covers every code the short vocabulary covers, and no more', () => {
+    expect(Object.keys(ERROR_HELP).sort()).toEqual(Object.keys(CLIENT_MESSAGES).sort());
+  });
+
+  it('never repeats the short message it sits behind', () => {
+    for (const [code, sentence] of help) {
+      expect(sentence, code).not.toBe(CLIENT_MESSAGES[code]);
+    }
+  });
+
+  it('names no file path, extension, or directory', () => {
+    for (const [code, sentence] of help) {
+      expect(sentence, code).not.toMatch(/\.(ts|tsx|js|jsx|json|yml|yaml|md|css|html)\b/);
+      expect(sentence, code).not.toMatch(/(^|\s)[\w.-]*\//);
+      expect(sentence, code).not.toMatch(/\.webagent|node_modules|src\b/);
+    }
+  });
+
+  it('uses no git, build or infrastructure vocabulary', () => {
+    const forbidden =
+      /\b(commit|branch|merge|rebase|diff|repository|repo|pull request|PR|SHA|stack trace|exception|npm|webpack|stderr|exit code|slot|queue depth|container|docker|API|token|model)\b/i;
+    for (const [code, sentence] of help) {
+      expect(sentence, code).not.toMatch(forbidden);
+    }
+  });
+
+  it('gives a person something to do, in at most two sentences', () => {
+    for (const [code, sentence] of help) {
+      expect(sentence, code).toMatch(/[.!?]$/);
+      expect(sentence[0], code).toEqual(sentence[0]?.toUpperCase());
+      // Long enough to explain, short enough to read inside a tooltip.
+      expect(sentence.length, code).toBeGreaterThan(CLIENT_MESSAGES[code].length);
+      expect(sentence.length, code).toBeLessThan(220);
+      expect(sentence.split(/(?<=[.!?])\s+/).length, code).toBeLessThanOrEqual(2);
     }
   });
 });

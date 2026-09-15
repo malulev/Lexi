@@ -1,4 +1,4 @@
-import type { AttachmentRefusal } from '@/lib/jobs/messages';
+import type { AttachmentRefusal, PublishRefusal, UndoRefusal } from '@/lib/jobs/messages';
 import type { ConversationStatus, ErrorCode, ModelTier, RequestKind, Stage } from '@/types';
 
 /**
@@ -65,6 +65,12 @@ export interface Dictionary {
     madeWith: string;
     /** `{cost}` — shown only in advanced mode. */
     costOf: string;
+    /**
+     * The question mark beside a setback: its accessible name, and what it
+     * promises to answer. Never decoration — a reader who presses it gets
+     * `errorHelp` for that code.
+     */
+    why: string;
   };
   preview: {
     ariaLabel: string;
@@ -141,6 +147,15 @@ export interface Dictionary {
   };
   tiers: Record<ModelTier, TierWords>;
   errors: Record<ErrorCode, string>;
+  /**
+   * The longer answer behind the question mark beside a setback: why the
+   * limit exists and what the client can do next. Two sentences at most.
+   */
+  errorHelp: Record<ErrorCode, string>;
+  /** Why publishing was refused, in more detail than `errors` alone. */
+  publishRefusals: Record<PublishRefusal, string>;
+  /** Why undoing was refused, likewise. */
+  undoRefusals: Record<UndoRefusal, string>;
   attachmentRefusals: Record<AttachmentRefusal, string>;
   interrupted: string;
   publicationInProgress: string;

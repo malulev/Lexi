@@ -2,9 +2,11 @@
 
 import type { ReactNode } from 'react';
 
+import { ErrorHelp } from './ErrorHelp';
 import { useTranslation } from './LocaleProvider';
 import { displayModelName } from '@/lib/cost';
 import { formatMessage, type Dictionary } from '@/lib/i18n';
+import { CLIENT_MESSAGES, INTERRUPTED_MESSAGE } from '@/lib/jobs/messages';
 import { en } from '@/lib/i18n/en';
 import type { ConversationStatus, Message } from '@/types';
 
@@ -41,15 +43,29 @@ export function selectMessageTone(message: Message): MessageTone {
 }
 
 /**
- * The prose a message renders. Per contracts/durable-record.md the prose
- * already stands alone — this never invents wording, it only falls back to
- * the closed error vocabulary (src/lib/jobs/messages.ts) on the defensive
- * case where prose is unexpectedly missing, rather than rendering nothing.
+ * The prose a message renders, in the language of the page.
+ *
+ * Per contracts/durable-record.md the prose already stands alone, and this
+ * never invents wording. What it does do is reconcile two surfaces that speak
+ * different languages on purpose: the durable record is written in English,
+ * once, because it is the developer's artefact and is read back as such — but
+ * the client interface is the client's, and a Hebrew reader whose change was
+ * refused should read the refusal in Hebrew.
+ *
+ * The rule is the one `localizeRefusal` already applies to a route's answer.
+ * When the stored prose *is* the code's own default sentence, every language
+ * has that same sentence and the reader gets theirs. Prose the host narrowed
+ * past the code — a summary of what actually changed — says more than the code
+ * does and exists only as written, so it is shown as written.
  */
 export function messageText(message: Message, t: Dictionary = en): string {
-  if (message.text) return message.text;
-  if (message.errorCode) return t.errors[message.errorCode];
-  return '';
+  if (message.errorCode && (!message.text || message.text === CLIENT_MESSAGES[message.errorCode])) {
+    return t.errors[message.errorCode];
+  }
+  // An abandoned request has no error code of its own — its process stopped
+  // existing — but it owes the client the same courtesy.
+  if (message.text === INTERRUPTED_MESSAGE) return t.interrupted;
+  return message.text;
 }
 
 const URL_PATTERN = /https:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]/g;
@@ -115,38 +131,43 @@ export function MessageList({ messages, showModels = false }: MessageListProps) 
 
   return (
     <ol className="message-list">
-      {messages.map((message) => (
-        <li
-          key={message.id}
-          className={`message message--${message.author} message--${selectMessageTone(message)}`}
-        >
-          <p className="message__text" dir="auto">
-            {renderProse(messageText(message, t))}
-          </p>
-          {message.previewUrl ? (
-            <p className="message__note">
-              <span className="message__note-mark" aria-hidden="true">
-                ✓
-              </span>
-              {t.messages.previewReady}
+      {messages.map((message) => {
+        const shown = messageText(message, t);
+        return (
+          <li
+            key={message.id}
+            className={`message message--${message.author} message--${selectMessageTone(message)}`}
+          >
+            <p className="message__text" dir="auto">
+              {renderProse(shown)}
             </p>
-          ) : null}
-          {showModels && message.model ? (
-            <p className="message__meta">
-              {formatMessage(t.messages.madeWith, { model: displayModelName(message.model) })}
-              {message.costUsd !== undefined ? (
-                <>
-                  {' · '}
-                  {formatMessage(t.messages.costOf, { cost: money(message.costUsd) })}
-                </>
-              ) : null}
-            </p>
-          ) : null}
-          <time className="message__time" dateTime={message.at} suppressHydrationWarning>
-            {formatTimestamp(message.at, tag)}
-          </time>
-        </li>
-      ))}
+            {/* Nothing renders unless there is a second thing to say. */}
+            <ErrorHelp errorCode={message.errorCode} shownText={shown} />
+            {message.previewUrl ? (
+              <p className="message__note">
+                <span className="message__note-mark" aria-hidden="true">
+                  ✓
+                </span>
+                {t.messages.previewReady}
+              </p>
+            ) : null}
+            {showModels && message.model ? (
+              <p className="message__meta">
+                {formatMessage(t.messages.madeWith, { model: displayModelName(message.model) })}
+                {message.costUsd !== undefined ? (
+                  <>
+                    {' · '}
+                    {formatMessage(t.messages.costOf, { cost: money(message.costUsd) })}
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+            <time className="message__time" dateTime={message.at} suppressHydrationWarning>
+              {formatTimestamp(message.at, tag)}
+            </time>
+          </li>
+        );
+      })}
     </ol>
   );
 }

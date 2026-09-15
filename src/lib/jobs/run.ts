@@ -129,6 +129,16 @@ export type BeginOutcome =
 /** Bounds the wait for a preview independently of the agent's own timeout. */
 const PREVIEW_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * How many attempted paths `request.blocked` carries.
+ *
+ * `maxFilesChanged` is a policy setting a site can raise, so the set the gate
+ * judged is not bounded by anything this module controls. A refusal is worth
+ * one legible line, not an unbounded one — and `attemptedCount` still reports
+ * the true total when the list is cut short.
+ */
+const BLOCKED_PATHS_LOGGED = 50;
+
 export async function beginRequest(deps: RunDeps, input: RunInput): Promise<BeginOutcome> {
   const requestId = input.requestId ?? `r_${randomUUID()}`;
   const acquired = await deps.lock.acquire(requestId, deps.config.settings.maxRequestMinutes);
@@ -233,6 +243,20 @@ async function execute(
     machine.advance('gating');
     const verdict = await judge(deps, tree, agent.cost, prepared.placed);
     if (verdict.failure) {
+      if (verdict.failure.outcome === 'blocked') {
+        // The record keeps the first offending path, because that is the one
+        // the gate stopped at. Deciding whether the allow list is too narrow
+        // or the agent wandered needs the whole set, and that question is the
+        // developer's, so it belongs in a log line rather than in a surface
+        // the client can see.
+        log.warn('request.blocked', {
+          requestId,
+          violation: verdict.failure.violation,
+          blockedPath: verdict.failure.blockedPath,
+          attemptedCount: verdict.files.length,
+          attemptedPaths: verdict.files.slice(0, BLOCKED_PATHS_LOGGED).map((file) => file.path),
+        });
+      }
       if (verdict.failure.errorCode === 'cost_ceiling') {
         await alertCostCeiling(deps, input, agent.cost.costUsd);
       }

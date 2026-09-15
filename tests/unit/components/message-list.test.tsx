@@ -5,6 +5,8 @@ import {
   selectMessageTone,
   messageText,
 } from '@/components/MessageList';
+import { CLIENT_MESSAGES } from '@/lib/jobs/messages';
+import { he } from '@/lib/i18n/he';
 import type { ConversationStatus, Message } from '@/types';
 
 /**
@@ -76,5 +78,58 @@ describe('messageText', () => {
     expect(messageText(buildMessage({ text: '', errorCode: 'build_failed' }))).toBe(
       'The change broke the site build. I can try to fix it.',
     );
+  });
+});
+
+/**
+ * The durable record is written in English, once, by the host — it is the
+ * developer's artefact and it is read back as such. The client interface is
+ * not: a Hebrew reader whose change was refused should read the refusal in
+ * Hebrew, not the English sentence that happens to be stored in the record.
+ *
+ * The rule that reconciles the two: when the stored prose *is* the code's own
+ * default sentence, the dictionary has the same sentence in every language and
+ * that is what gets shown. Prose the host narrowed past the code says more
+ * than the code does and only exists in English, so it is shown as written.
+ * This is the same rule `localizeRefusal` applies to a route's answer.
+ */
+describe('a refused message in a language that is not English', () => {
+  function refused(text: string): Message {
+    return {
+      id: 1,
+      author: 'agent',
+      at: '2026-09-15T12:00:00.000Z',
+      text,
+      outcome: 'blocked',
+      errorCode: 'blocked_by_policy',
+    };
+  }
+
+  it('reads in the page language even though the record stored English', () => {
+    const shown = messageText(refused(CLIENT_MESSAGES.blocked_by_policy), he);
+
+    expect(shown).toBe(he.errors.blocked_by_policy);
+    expect(shown).not.toBe(CLIENT_MESSAGES.blocked_by_policy);
+  });
+
+  it('keeps prose the host wrote past the code, which exists only as written', () => {
+    const narrowed = 'I changed the heading and the footer for you.';
+
+    expect(messageText(refused(narrowed), he)).toBe(narrowed);
+  });
+
+  it('still falls back to the code when a message carries no prose at all', () => {
+    expect(messageText(refused(''), he)).toBe(he.errors.blocked_by_policy);
+  });
+
+  it('leaves a message with no error code alone', () => {
+    const plain: Message = {
+      id: 2,
+      author: 'client',
+      at: '2026-09-15T12:00:00.000Z',
+      text: 'Make the heading bigger',
+    };
+
+    expect(messageText(plain, he)).toBe('Make the heading bigger');
   });
 });

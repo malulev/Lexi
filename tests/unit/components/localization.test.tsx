@@ -8,7 +8,7 @@ import { selectPublishOffer } from '@/components/PublishControls';
 import { localizeRefusal } from '@/components/server-message';
 import { pickLine } from '@/components/WorkingIndicator';
 import { DICTIONARIES } from '@/lib/i18n';
-import { CLIENT_MESSAGES, PUBLISH_REFUSALS } from '@/lib/jobs/messages';
+import { CLIENT_MESSAGES, PUBLISH_REFUSALS, UNDO_REFUSALS } from '@/lib/jobs/messages';
 import { describeUpdatedAt } from '@/lib/time';
 
 /**
@@ -80,16 +80,31 @@ describe('describeUpdatedAt in another language', () => {
 });
 
 describe('localizeRefusal', () => {
-  it('translates a code’s default sentence, and shows a narrowed one as sent', () => {
+  it('translates a code’s default sentence', () => {
     expect(
       localizeRefusal(
         { error: 'request_in_flight', message: CLIENT_MESSAGES.request_in_flight },
         he,
       ),
     ).toBe(he.errors.request_in_flight);
+  });
+
+  it('translates a narrowed refusal too, which used to arrive in English', () => {
+    // "This change is already published" says more than "there is nothing
+    // ready to publish here", which is why the route narrows it. That is no
+    // reason for a Hebrew reader to get it in English.
     expect(
       localizeRefusal({ error: 'nothing_to_publish', message: PUBLISH_REFUSALS.published }, he),
-    ).toBe(PUBLISH_REFUSALS.published);
+    ).toBe(he.publishRefusals.published);
+    expect(localizeRefusal({ error: 'nothing_to_undo', message: UNDO_REFUSALS.ready }, he)).toBe(
+      he.undoRefusals.ready,
+    );
+  });
+
+  it('shows a sentence from nowhere in the vocabulary exactly as sent', () => {
+    expect(
+      localizeRefusal({ error: 'nothing_to_publish', message: 'Something else entirely.' }, he),
+    ).toBe('Something else entirely.');
   });
 
   it('never invents a sentence for a body it cannot read', () => {

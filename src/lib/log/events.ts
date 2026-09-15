@@ -14,6 +14,9 @@ export type LogEvent =
   | 'request.started'
   | 'request.ended'
   | 'request.lock_leak'
+  // The gate refused the change: which rule, which path stopped it, and every
+  // path the change touched. Operator-facing — the client is told none of it.
+  | 'request.blocked'
   | 'publication.started'
   | 'publication.ended'
   // Capacity.

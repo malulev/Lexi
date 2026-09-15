@@ -45,6 +45,7 @@ export const fr: Dictionary = {
     previewReady: 'Un aperçu est prêt.',
     madeWith: 'Réalisé avec {model}',
     costOf: 'coût {cost}',
+    why: 'Pourquoi cela s’est-il produit ?',
   },
   preview: {
     ariaLabel: 'Aperçu',
@@ -259,6 +260,58 @@ export const fr: Dictionary = {
     hosting_limit:
       'L’hébergement de votre site a atteint la limite de son offre ; rien ne peut être construit. Voyez votre développeur.',
     internal_error: 'Quelque chose s’est mal passé de mon côté. Rien n’a été publié.',
+  },
+  errorHelp: {
+    blocked_by_policy:
+      'Votre développeur a choisi quelles parties de ce site peuvent être modifiées ici, et cette demande allait au-delà. Demandez-lui d’ouvrir la partie dont vous avez besoin.',
+    request_in_flight:
+      'Une seule modification est appliquée à la fois, pour que deux d’entre elles ne s’écrasent jamais. La vôtre démarrera dès que la précédente sera terminée.',
+    too_busy:
+      'Plus de modifications ont été demandées en même temps que ce site ne peut en traiter. Rien n’est perdu — renvoyez la même chose dans quelques minutes.',
+    agent_timeout:
+      'Chaque modification a une limite de temps, pour qu’une demande bloquée ne tourne pas indéfiniment. Demander une seule chose à la fois suffit en général.',
+    build_failed:
+      'Votre site est reconstruit après chaque modification, et celle-ci a empêché la reconstruction. Rien n’a atteint le site en ligne, vous pouvez réessayer sans risque.',
+    site_unreachable:
+      'Le service qui met votre site en ligne ne répond pas. Cela se passe en dehors de votre site et se résout généralement tout seul en quelques minutes.',
+    cost_ceiling:
+      'Chaque modification a une limite de dépense fixée par votre développeur. Une demande plus petite, ou coupée en deux, restera à l’intérieur.',
+    out_of_date:
+      'Votre site a changé pendant l’enregistrement, et enregistrer maintenant annulerait ce changement. Redemandez la même chose : elle partira de l’état actuel.',
+    nothing_to_change:
+      'J’ai regardé votre site et il correspond déjà à ce que vous demandez, il n’y avait donc rien à modifier. Si vous pensiez à un autre endroit, précisez lequel.',
+    nothing_to_publish:
+      'Seule une modification dont vous avez approuvé l’aperçu peut être mise en ligne. Attendez l’aperçu, regardez-le, puis approuvez-le.',
+    nothing_to_undo:
+      'L’annulation ne concerne qu’une modification mise en ligne depuis cette conversation. Rien d’ici ne l’a été, il n’y a donc rien à reprendre.',
+    site_moved_on:
+      'D’autres modifications sont passées en ligne après celle-ci. L’annuler maintenant les retirerait aussi, ce n’est donc pas proposé.',
+    site_conflict:
+      'Une autre modification a depuis touché la même partie de votre site. Redemandez ce que vous voulez : cela partira de ce qui s’y trouve maintenant.',
+    model_quota:
+      'Le service de rédaction utilisé par ce site a un quota journalier, et celui d’aujourd’hui est épuisé. Il repart demain, et rien de ce que vous avez envoyé n’est perdu.',
+    model_credit:
+      'Le compte derrière le service de rédaction n’a plus de crédit. Seul votre développeur peut en ajouter, cela vaut la peine de le prévenir.',
+    model_unavailable:
+      'Le service de rédaction ne répond pas pour le moment. Votre site n’a rien d’anormal, et le service revient généralement en quelques minutes.',
+    hosting_limit:
+      'L’offre qui héberge votre site limite le nombre de reconstructions, et cette limite est atteinte. Votre développeur peut l’augmenter.',
+    internal_error:
+      'Quelque chose a échoué dans l’éditeur et non dans votre demande : votre site n’a pas été touché. Réessayez, et prévenez votre développeur si cela persiste.',
+  },
+  publishRefusals: {
+    not_previewed:
+      'Il n’y a encore rien de prêt à publier ici. Attendez l’aperçu, puis approuvez-le.',
+    published: 'Cette modification est déjà publiée.',
+    undone:
+      'Cette modification a été publiée puis annulée. Ouvrez-en une nouvelle pour modifier votre site à nouveau.',
+    unavailable: 'Cette conversation est terminée, il n’y a donc rien à publier.',
+  },
+  undoRefusals: {
+    not_previewed: 'Rien de cette conversation n’a été publié, il n’y a donc rien à annuler.',
+    ready: 'Cette modification n’a pas encore été publiée, il n’y a donc rien à annuler.',
+    undone: 'Cette modification a déjà été annulée.',
+    unavailable: 'Rien de cette conversation n’est en ligne, il n’y a donc rien à annuler.',
   },
   attachmentRefusals: {
     too_large: 'Ce fichier est trop volumineux. Chaque fichier doit faire 10 Mo au plus.',

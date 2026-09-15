@@ -45,6 +45,7 @@ export const nl: Dictionary = {
     previewReady: 'Er staat een voorbeeld klaar.',
     madeWith: 'Gemaakt met {model}',
     costOf: 'kosten {cost}',
+    why: 'Waarom is dit gebeurd?',
   },
   preview: {
     ariaLabel: 'Voorbeeld',
@@ -250,6 +251,58 @@ export const nl: Dictionary = {
     hosting_limit:
       'De hosting van je website zit aan de limiet van het abonnement, dus er kan nu niets worden gebouwd. Vraag je ontwikkelaar.',
     internal_error: 'Er ging iets mis aan mijn kant. Er is niets gepubliceerd.',
+  },
+  errorHelp: {
+    blocked_by_policy:
+      'Je ontwikkelaar heeft gekozen welke delen van deze site hier gewijzigd mogen worden, en deze wijziging reikte daarbuiten. Vraag of het deel dat je nodig hebt opengezet kan worden.',
+    request_in_flight:
+      'Er loopt één wijziging tegelijk op een site, zodat er nooit twee over elkaar heen schrijven. Die van jou begint zodra de vorige klaar is.',
+    too_busy:
+      'Er zijn meer wijzigingen tegelijk gevraagd dan deze site aankan. Er is niets verloren — stuur hetzelfde over een paar minuten opnieuw.',
+    agent_timeout:
+      'Elke wijziging heeft een tijdslimiet, zodat een vastgelopen wijziging niet eindeloos doorloopt. Eén ding tegelijk vragen is meestal genoeg.',
+    build_failed:
+      'Je website wordt na elke wijziging opnieuw opgebouwd, en deze hield dat tegen. Er is niets op de live site terechtgekomen, dus opnieuw proberen kan veilig.',
+    site_unreachable:
+      'De dienst die je website online zet reageert nu niet. Dat staat los van je site en lost zichzelf meestal binnen een paar minuten op.',
+    cost_ceiling:
+      'Elke wijziging heeft een uitgavenlimiet die je ontwikkelaar voor deze site heeft ingesteld. Iets kleiners vragen, of het in tweeën splitsen, blijft eronder.',
+    out_of_date:
+      'Je website veranderde terwijl dit werd opgeslagen, en nu opslaan zou dat ongedaan maken. Vraag hetzelfde opnieuw; het begint dan bij hoe de site er nu uitziet.',
+    nothing_to_change:
+      'Ik heb naar je site gekeken en die leest al zoals je vroeg, dus er viel niets te wijzigen. Bedoelde je een andere plek, zeg dan welke.',
+    nothing_to_publish:
+      'Alleen een wijziging met een voorbeeld dat je hebt goedgekeurd kan live. Wacht op het voorbeeld, bekijk het, en keur het dan goed.',
+    nothing_to_undo:
+      'Ongedaan maken geldt alleen voor een wijziging die vanuit dit gesprek live is gegaan. Dat is hier nog niet gebeurd.',
+    site_moved_on:
+      'Er zijn na deze wijziging andere wijzigingen live gegaan. Dit nu ongedaan maken zou die ook weghalen, dus dat wordt niet aangeboden.',
+    site_conflict:
+      'Een andere wijziging heeft hetzelfde deel van je site inmiddels aangepast. Vraag opnieuw wat je wilt; het begint dan bij wat er nu staat.',
+    model_quota:
+      'De schrijfdienst die deze site gebruikt heeft een daglimiet, en die van vandaag is op. Morgen begint hij opnieuw, en niets van wat je stuurde is verloren.',
+    model_credit:
+      'Het account achter de schrijfdienst heeft geen tegoed meer. Alleen je ontwikkelaar kan dat aanvullen, dus meld het even.',
+    model_unavailable:
+      'De schrijfdienst reageert op dit moment niet. Er is niets mis met je website, en hij komt meestal binnen een paar minuten terug.',
+    hosting_limit:
+      'Het pakket waarop je website draait beperkt hoe vaak hij opnieuw gebouwd kan worden, en die grens is bereikt. Je ontwikkelaar kan hem verhogen.',
+    internal_error:
+      'Er ging iets mis in de editor en niet in je aanvraag, dus je website is niet aangeraakt. Probeer het nog eens, en meld het als het blijft gebeuren.',
+  },
+  publishRefusals: {
+    not_previewed:
+      'Er is hier nog niets klaar om te publiceren. Wacht op het voorbeeld en keur het dan goed.',
+    published: 'Deze wijziging is al gepubliceerd.',
+    undone:
+      'Deze wijziging is gepubliceerd en daarna ongedaan gemaakt. Begin een nieuwe om je site opnieuw te wijzigen.',
+    unavailable: 'Dit gesprek is afgerond, dus er is niets te publiceren.',
+  },
+  undoRefusals: {
+    not_previewed: 'Er is niets uit dit gesprek gepubliceerd, dus er is niets ongedaan te maken.',
+    ready: 'Deze wijziging is nog niet gepubliceerd, dus er is niets ongedaan te maken.',
+    undone: 'Deze wijziging is al ongedaan gemaakt.',
+    unavailable: 'Er staat niets uit dit gesprek live, dus er is niets ongedaan te maken.',
   },
   attachmentRefusals: {
     too_large: 'Dat bestand is te groot. Elk bestand mag maximaal 10 MB zijn.',
