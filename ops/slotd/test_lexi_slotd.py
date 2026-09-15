@@ -384,3 +384,220 @@ class BrokerStatus(unittest.IsolatedAsyncioTestCase):
         # Granted at once is a wait of zero, and a median of zero is a fact
         # worth reporting, not an absence of data.
         self.assertEqual(status["waitSecondsP50"], 0.0)
+
+
+# ---------------------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------------------
+import json
+import tempfile
+
+
+class ServerHarness:
+    """A real daemon on a temp socket, in-process, with a fake platform."""
+
+    def __init__(self, capacity=2, identity="claimed", platform=None, config_env=None):
+        self.dir = tempfile.TemporaryDirectory()
+        env = {"SLOTD_SOCKET": os.path.join(self.dir.name, "s.sock"), "SLOTD_IDENTITY": identity}
+        env.update(config_env or {})
+        self.config = slotd.Config.from_env(env)
+        self.config.tick_seconds = 0.01
+        self.platform = platform or slotd.FakePlatform()
+        self.events: list = []
+        self.broker = slotd.Broker(self.config, self.platform, capacity, log=self.record)
+        self.server_logic = slotd.Server(self.config, self.platform, self.broker, log=self.record)
+        self.server = None
+
+    def record(self, event, fields):
+        self.events.append((event, fields))
+
+    async def __aenter__(self):
+        sock = slotd.listening_socket(self.config)
+        self.server = await asyncio.start_unix_server(self.server_logic.handle, sock=sock)
+        return self
+
+    async def __aexit__(self, *exc):
+        self.server.close()
+        await self.server.wait_closed()
+        self.dir.cleanup()
+
+    async def connect(self):
+        return await asyncio.open_unix_connection(self.config.socket_path)
+
+
+async def send(writer, message):
+    writer.write((json.dumps(message) + "\n").encode())
+    await writer.drain()
+
+
+async def receive(reader, timeout=2.0):
+    line = await asyncio.wait_for(reader.readline(), timeout)
+    return json.loads(line)
+
+
+async def acquire(harness, client, request_id="r", max_wait_ms=None):
+    reader, writer = await harness.connect()
+    message = {"op": "acquire", "client": client, "requestId": request_id}
+    if max_wait_ms is not None:
+        message["maxWaitMs"] = max_wait_ms
+    await send(writer, message)
+    return reader, writer
+
+
+class ServerProtocol(unittest.IsolatedAsyncioTestCase):
+    async def test_a_client_below_capacity_is_granted_with_the_memory_cap(self):
+        async with ServerHarness(capacity=1) as harness:
+            reader, writer = await acquire(harness, "a", "req-1")
+            self.assertEqual(await receive(reader), {"event": "granted", "memoryBytes": slotd.parse_size("800M")})
+            self.assertEqual(harness.broker.status()["holders"], {"a": "req-1"})
+            writer.close()
+
+    async def test_closing_the_connection_releases_the_lease_and_promotes_the_next_waiter(self):
+        async with ServerHarness(capacity=1) as harness:
+            first_reader, first_writer = await acquire(harness, "a")
+            await receive(first_reader)
+            second_reader, second_writer = await acquire(harness, "b")
+            self.assertEqual(await receive(second_reader), {"event": "queued", "position": 1})
+
+            first_writer.close()
+            await first_writer.wait_closed()
+            self.assertEqual(await receive(second_reader), {"event": "granted", "memoryBytes": slotd.parse_size("800M")})
+            self.assertEqual(harness.broker.status()["holders"], {"b": "r"})
+            second_writer.close()
+
+    async def test_a_waiter_that_hangs_up_is_withdrawn(self):
+        async with ServerHarness(capacity=1) as harness:
+            holder_reader, holder_writer = await acquire(harness, "a")
+            await receive(holder_reader)
+            leaver_reader, leaver_writer = await acquire(harness, "b")
+            await receive(leaver_reader)
+            stayer_reader, stayer_writer = await acquire(harness, "c")
+            self.assertEqual(await receive(stayer_reader), {"event": "queued", "position": 2})
+
+            leaver_writer.close()
+            await leaver_writer.wait_closed()
+            await asyncio.sleep(0.05)
+            self.assertEqual(harness.broker.status()["queued"], 1)
+
+            holder_writer.close()
+            await holder_writer.wait_closed()
+            self.assertEqual((await receive(stayer_reader))["event"], "granted")
+            stayer_writer.close()
+
+    async def test_a_refusal_is_answered_and_the_connection_closed(self):
+        async with ServerHarness(capacity=1) as harness:
+            reader, writer = await acquire(harness, "a")
+            await receive(reader)
+            again_reader, again_writer = await acquire(harness, "a")
+            self.assertEqual(await receive(again_reader), {"event": "refused", "reason": "already_holding"})
+            self.assertEqual(await again_reader.read(), b"")
+            writer.close()
+
+    async def test_a_malformed_request_is_refused_as_bad_request(self):
+        async with ServerHarness() as harness:
+            reader, writer = await harness.connect()
+            writer.write(b"this is not json\n")
+            await writer.drain()
+            self.assertEqual(await receive(reader), {"event": "refused", "reason": "bad_request"})
+            reader2, writer2 = await harness.connect()
+            await send(writer2, {"op": "dance"})
+            self.assertEqual(await receive(reader2), {"event": "refused", "reason": "bad_request"})
+
+    async def test_status_answers_the_broker_picture(self):
+        async with ServerHarness(capacity=3) as harness:
+            reader, writer = await harness.connect()
+            await send(writer, {"op": "status"})
+            status = await receive(reader)
+            self.assertEqual(status["capacity"], 3)
+            self.assertEqual(status["leased"], 0)
+            self.assertIn("memAvailable", status)
+
+
+class ServerIdentity(unittest.IsolatedAsyncioTestCase):
+    async def test_peer_mode_names_the_client_from_its_uid_and_ignores_what_it_claims(self):
+        platform = slotd.FakePlatform(uid=1000, members=["malulev"], names={1000: "malulev"})
+        async with ServerHarness(capacity=1, identity="peer", platform=platform) as harness:
+            reader, writer = await acquire(harness, "someone-else", "req-9")
+            self.assertEqual((await receive(reader))["event"], "granted")
+            self.assertEqual(harness.broker.status()["holders"], {"malulev": "req-9"})
+            writer.close()
+
+    async def test_peer_mode_refuses_a_uid_that_is_not_an_enrolled_client(self):
+        platform = slotd.FakePlatform(uid=1002, members=["malulev"], names={1002: "claude"})
+        async with ServerHarness(capacity=1, identity="peer", platform=platform) as harness:
+            reader, writer = await acquire(harness, "malulev")
+            self.assertEqual(await receive(reader), {"event": "refused", "reason": "unknown_client"})
+            self.assertEqual(harness.broker.status()["refused"], {"unknown_client": 1})
+            self.assertIn(("slotd.unknown_client", {"uid": 1002, "name": "claude"}), harness.events)
+
+    async def test_peer_mode_refuses_a_uid_with_no_name_at_all(self):
+        platform = slotd.FakePlatform(uid=4242, members=["malulev"], names={})
+        async with ServerHarness(capacity=1, identity="peer", platform=platform) as harness:
+            reader, writer = await acquire(harness, "malulev")
+            self.assertEqual(await receive(reader), {"event": "refused", "reason": "unknown_client"})
+
+    async def test_peer_mode_against_the_real_kernel_sees_this_process(self):
+        me = pwd_name()
+        platform = slotd.FakePlatform(members=[me], names={os.getuid(): me})
+        platform.peer_uid = slotd.detect_platform().peer_uid  # the one real call
+        async with ServerHarness(capacity=1, identity="peer", platform=platform) as harness:
+            reader, writer = await acquire(harness, "ignored")
+            self.assertEqual((await receive(reader))["event"], "granted")
+            self.assertEqual(list(harness.broker.status()["holders"]), [me])
+            writer.close()
+
+    async def test_claimed_mode_refuses_a_request_that_names_nobody(self):
+        async with ServerHarness(capacity=1, identity="claimed") as harness:
+            reader, writer = await harness.connect()
+            await send(writer, {"op": "acquire", "requestId": "r"})
+            self.assertEqual(await receive(reader), {"event": "refused", "reason": "unknown_client"})
+
+
+class CapacityAtStartup(unittest.TestCase):
+    def test_computed_from_the_group_size_unless_overridden(self):
+        events = []
+        platform = slotd.FakePlatform(mem_total=3819 * 1024 ** 2, cpu_count=2, members=["a", "b"])
+        config = slotd.Config.from_env({})
+        self.assertEqual(slotd.current_capacity(config, platform, lambda e, f: events.append((e, f))), 4)
+        self.assertEqual(events[0][0], "slotd.capacity")
+        self.assertEqual(events[0][1]["source"], "computed")
+        self.assertEqual(events[0][1]["clients"], 2)
+
+    def test_an_empty_group_counts_as_one_client(self):
+        platform = slotd.FakePlatform(mem_total=3819 * 1024 ** 2, cpu_count=2, members=[])
+        config = slotd.Config.from_env({})
+        events = []
+        slotd.current_capacity(config, platform, lambda e, f: events.append((e, f)))
+        self.assertEqual(events[0][1]["clients"], 1)
+
+    def test_overrides_win(self):
+        platform = slotd.FakePlatform(members=["a"])
+        config = slotd.Config.from_env({"SLOTD_CAPACITY": "9"})
+        self.assertEqual(slotd.current_capacity(config, platform, lambda e, f: None), 9)
+        config = slotd.Config.from_env({"SLOTD_CLIENTS": "20"})
+        platform = slotd.FakePlatform(mem_total=3819 * 1024 ** 2, cpu_count=2, members=["a"])
+        self.assertEqual(slotd.current_capacity(config, platform, lambda e, f: None), 1)
+
+
+class PromRendering(unittest.TestCase):
+    def test_renders_every_metric_with_known_reasons_present_at_zero(self):
+        text = slotd.render_prom({
+            "capacity": 4, "leased": 2, "queued": 6, "braked": True,
+            "waitSecondsP50": 12.4, "heldSecondsP50": 40.0,
+            "refused": {"already_holding": 1}, "memoryBytes": 5, "memAvailable": 9, "holders": {},
+        })
+        self.assertIn("lexi_slots_capacity 4\n", text)
+        self.assertIn("lexi_slots_leased 2\n", text)
+        self.assertIn("lexi_slots_queued 6\n", text)
+        self.assertIn("lexi_slots_braked 1\n", text)
+        self.assertIn("lexi_slots_wait_seconds_p50 12.4\n", text)
+        self.assertIn('lexi_slots_refused_total{reason="already_holding"} 1\n', text)
+        self.assertIn('lexi_slots_refused_total{reason="projected_wait_exceeds_ceiling"} 0\n', text)
+        self.assertIn('lexi_slots_refused_total{reason="unknown_client"} 0\n', text)
+        self.assertIn("# TYPE lexi_slots_capacity gauge\n", text)
+
+    def test_omits_the_wait_percentile_before_there_is_one(self):
+        text = slotd.render_prom({"capacity": 1, "leased": 0, "queued": 0, "braked": False,
+                                  "waitSecondsP50": None, "heldSecondsP50": None, "refused": {},
+                                  "memoryBytes": 5, "memAvailable": 9, "holders": {}})
+        self.assertNotIn("lexi_slots_wait_seconds_p50", text)

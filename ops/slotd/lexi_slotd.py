@@ -490,3 +490,254 @@ class Broker:
         while self.queue:
             await asyncio.sleep(self.config.tick_seconds)
             self.pump()
+
+
+# ---------------------------------------------------------------------------
+# Server: the wire protocol and who is on the other end
+# ---------------------------------------------------------------------------
+
+
+def _json_line(payload: object) -> bytes:
+    return (json.dumps(payload, separators=(",", ":")) + "\n").encode()
+
+
+class Server:
+    def __init__(self, config: Config, platform: Platform, broker: Broker, log: LogFn = _no_log) -> None:
+        self.config = config
+        self.platform = platform
+        self.broker = broker
+        self.log = log
+
+    def identify(self, sock: socket.socket, message: Dict[str, object]) -> Optional[str]:
+        """The client's name, or None if this connection may not take a slot."""
+        if self.config.identity == "claimed":
+            claimed = message.get("client")
+            return str(claimed) if claimed else None
+        uid = self.platform.peer_uid(sock)
+        name = self.platform.uid_to_name(uid)
+        if name is None or name not in self.platform.group_members(self.config.group):
+            self.log("slotd.unknown_client", {"uid": uid, "name": name})
+            return None
+        return name
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        sock = writer.get_extra_info("socket")
+        try:
+            raw = await reader.readline()
+            if not raw:
+                return
+            try:
+                message = json.loads(raw)
+            except ValueError:
+                message = None
+            if not isinstance(message, dict):
+                writer.write(_json_line({"event": "refused", "reason": "bad_request"}))
+                return
+
+            operation = message.get("op")
+            if operation == "status":
+                writer.write(_json_line(self.broker.status()))
+                await writer.drain()
+                return
+            if operation != "acquire":
+                writer.write(_json_line({"event": "refused", "reason": "bad_request"}))
+                return
+
+            request_id = str(message.get("requestId", ""))
+            client = self.identify(sock, message)
+            if client is None:
+                self.broker.refuse("?", request_id, "unknown_client")
+                writer.write(_json_line({"event": "refused", "reason": "unknown_client"}))
+                return
+
+            raw_wait = message.get("maxWaitMs")
+            max_wait_ms = int(raw_wait) if isinstance(raw_wait, (int, float)) and raw_wait > 0 else None
+
+            def on_queued(position: int) -> None:
+                writer.write(_json_line({"event": "queued", "position": position}))
+
+            # The client sends nothing after `acquire`; the next thing on this
+            # socket is its EOF, which is the lease ending — or the wait ending.
+            hangup = asyncio.ensure_future(reader.read())
+            decision = asyncio.ensure_future(self.broker.acquire(client, request_id, max_wait_ms, on_queued))
+            done, _pending = await asyncio.wait({hangup, decision}, return_when=asyncio.FIRST_COMPLETED)
+            if decision not in done:
+                decision.cancel()
+                try:
+                    await decision
+                except asyncio.CancelledError:
+                    pass
+                return
+
+            outcome = decision.result()
+            if isinstance(outcome, Refusal):
+                hangup.cancel()
+                writer.write(_json_line({"event": "refused", "reason": outcome.reason}))
+                return
+
+            writer.write(_json_line({"event": "granted", "memoryBytes": outcome.memory_bytes}))
+            await writer.drain()
+            try:
+                await hangup
+            finally:
+                self.broker.release(client)
+        finally:
+            writer.close()
+
+
+# ---------------------------------------------------------------------------
+# Process: socket, capacity, signals, logging
+# ---------------------------------------------------------------------------
+
+
+def log_line(event: str, fields: Dict[str, object]) -> None:
+    """One JSON object per line on stdout; journald keeps them."""
+    record: Dict[str, object] = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "event": event}
+    record.update(fields)
+    sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def listening_socket(config: Config) -> socket.socket:
+    """systemd's socket when activated (fd 3), otherwise bind the path ourselves."""
+    if os.environ.get("LISTEN_FDS") == "1" and os.environ.get("LISTEN_PID") == str(os.getpid()):
+        return socket.socket(fileno=3)
+    path = config.socket_path
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.bind(path)
+    # 0666 on purpose. Reachability is not authorization here: every connection
+    # is identified by its peer credentials and refused unless that uid maps to
+    # an enrolled client. A rootless container's process does not carry the
+    # client's host group memberships, so a group-restricted socket would
+    # refuse exactly the apps this serves.
+    os.chmod(path, 0o666)
+    sock.listen(64)
+    return sock
+
+
+def current_capacity(config: Config, platform: Platform, log: LogFn) -> int:
+    if config.capacity_override is not None:
+        capacity = config.capacity_override
+        clients = config.clients_override
+        source = "override"
+    else:
+        clients = config.clients_override
+        if clients is None:
+            clients = max(1, len(platform.group_members(config.group)))
+        capacity = compute_capacity(platform.mem_total(), platform.cpu_count(), clients, config)
+        source = "computed"
+    log("slotd.capacity", {
+        "capacity": capacity, "source": source, "clients": clients,
+        "memTotal": platform.mem_total(), "cpuCount": platform.cpu_count(),
+        "agentMemEstimate": config.agent_mem_estimate, "agentMemCap": config.agent_mem_cap,
+    })
+    return capacity
+
+
+async def serve(config: Config, platform: Platform, log: LogFn) -> None:
+    broker = Broker(config, platform, current_capacity(config, platform, log), log=log)
+    logic = Server(config, platform, broker, log=log)
+    server = await asyncio.start_unix_server(logic.handle, sock=listening_socket(config))
+
+    loop = asyncio.get_running_loop()
+    stopping: "asyncio.Future[None]" = loop.create_future()
+
+    def on_hup() -> None:
+        broker.capacity = current_capacity(config, platform, log)
+        broker.pump()
+
+    def on_stop() -> None:
+        if not stopping.done():
+            stopping.set_result(None)
+
+    loop.add_signal_handler(signal.SIGHUP, on_hup)
+    loop.add_signal_handler(signal.SIGTERM, on_stop)
+    loop.add_signal_handler(signal.SIGINT, on_stop)
+
+    log("slotd.started", {"socket": config.socket_path, "identity": config.identity, "capacity": broker.capacity})
+    if config.identity == "claimed":
+        log("slotd.identity_claimed", {"warning": "clients name themselves; for local testing only"})
+    async with server:
+        await stopping
+    log("slotd.stopped", {})
+
+
+# ---------------------------------------------------------------------------
+# `status` command: what ops/probe.sh and ops/status.sh call
+# ---------------------------------------------------------------------------
+
+_KNOWN_REASONS = ("already_holding", "projected_wait_exceeds_ceiling", "unknown_client")
+
+
+def render_prom(status: Dict[str, object]) -> str:
+    lines: List[str] = []
+
+    def gauge(name: str, help_text: str, value: object) -> None:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} gauge")
+        lines.append(f"{name} {value}")
+
+    gauge("lexi_slots_capacity", "Agent runs this host admits at once.", status["capacity"])
+    gauge("lexi_slots_leased", "Agent runs holding a slot now.", status["leased"])
+    gauge("lexi_slots_queued", "Requests waiting for a slot.", status["queued"])
+    gauge("lexi_slots_braked", "1 while the memory brake holds the head of the queue.", 1 if status["braked"] else 0)
+    if status.get("waitSecondsP50") is not None:
+        gauge("lexi_slots_wait_seconds_p50", "Median wait of recent granted requests.", status["waitSecondsP50"])
+    lines.append("# HELP lexi_slots_refused_total Requests refused since the daemon started, by reason.")
+    lines.append("# TYPE lexi_slots_refused_total counter")
+    refused = status.get("refused") or {}
+    assert isinstance(refused, dict)
+    for reason in sorted(set(_KNOWN_REASONS) | set(refused)):
+        lines.append(f'lexi_slots_refused_total{{reason="{reason}"}} {refused.get(reason, 0)}')
+    return "\n".join(lines) + "\n"
+
+
+def status_command(argv: List[str]) -> int:
+    path = Config.from_env().socket_path
+    prom = False
+    index = 0
+    while index < len(argv):
+        if argv[index] == "--socket" and index + 1 < len(argv):
+            path = argv[index + 1]
+            index += 2
+        elif argv[index] == "--prom":
+            prom = True
+            index += 1
+        else:
+            sys.stderr.write("usage: lexi_slotd.py status [--socket PATH] [--prom]\n")
+            return 2
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.settimeout(5)
+        sock.connect(path)
+        sock.sendall(_json_line({"op": "status"}))
+        data = b""
+        while not data.endswith(b"\n"):
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    status = json.loads(data)
+    if prom:
+        sys.stdout.write(render_prom(status))
+    else:
+        sys.stdout.write(json.dumps(status, indent=2) + "\n")
+    return 0
+
+
+def main(argv: List[str]) -> int:
+    if argv and argv[0] == "status":
+        return status_command(argv[1:])
+    if argv:
+        sys.stderr.write("usage: lexi_slotd.py            # run the daemon (configuration from the environment)\n"
+                         "       lexi_slotd.py status [--socket PATH] [--prom]\n")
+        return 2
+    asyncio.run(serve(Config.from_env(), detect_platform(), log_line))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
