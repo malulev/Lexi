@@ -44,6 +44,11 @@ jobs:
       - name: Integration tests
         run: npm run test:int
 
+      # The admission daemon is Python, standard library only; ubuntu-latest
+      # ships python3. Runs without root, Docker or a real socket path.
+      - name: Slot daemon tests
+        run: npm run test:slotd
+
       # Deployment configuration is read at startup, not at build time, so
       # this needs no environment. If it ever starts needing one, that is a
       # regression in instrumentation.ts, and this step is where it surfaces.

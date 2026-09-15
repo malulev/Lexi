@@ -65,6 +65,10 @@ class Config:
     socket_path: str = "/run/lexi/slotd.sock"
     clients_override: Optional[int] = None
     capacity_override: Optional[int] = None
+    # Test and demo only: while this file exists and holds an integer, it is
+    # what mem_available() reports. Lets a harness show the brake holding and
+    # releasing through the real process without guessing what the OS will do.
+    mem_available_file: Optional[str] = None
     ring_size: int = 50
     tick_seconds: float = 1.0
 
@@ -93,6 +97,7 @@ class Config:
             config.clients_override = int(source["SLOTD_CLIENTS"])
         if "SLOTD_CAPACITY" in source:
             config.capacity_override = int(source["SLOTD_CAPACITY"])
+        config.mem_available_file = source.get("SLOTD_MEM_AVAILABLE_FILE") or None
         return config
 
 
@@ -277,6 +282,39 @@ class FakePlatform(Platform):
 
     def uid_to_name(self, uid: int) -> Optional[str]:
         return self.names.get(uid)
+
+
+class OverridablePlatform(Platform):
+    """Delegates everything; mem_available() comes from a file while one exists (tests and demos)."""
+
+    def __init__(self, inner: Platform, path: str) -> None:
+        self.inner = inner
+        self.path = path
+
+    def mem_total(self) -> int:
+        return self.inner.mem_total()
+
+    def mem_available(self) -> int:
+        try:
+            with open(self.path, encoding="utf8") as handle:
+                text = handle.read().strip()
+            if text:
+                return int(text)
+        except (OSError, ValueError):
+            pass
+        return self.inner.mem_available()
+
+    def cpu_count(self) -> int:
+        return self.inner.cpu_count()
+
+    def peer_uid(self, sock: socket.socket) -> int:
+        return self.inner.peer_uid(sock)
+
+    def group_members(self, group: str) -> List[str]:
+        return self.inner.group_members(group)
+
+    def uid_to_name(self, uid: int) -> Optional[str]:
+        return self.inner.uid_to_name(uid)
 
 
 def detect_platform() -> Platform:
@@ -735,7 +773,12 @@ def main(argv: List[str]) -> int:
         sys.stderr.write("usage: lexi_slotd.py            # run the daemon (configuration from the environment)\n"
                          "       lexi_slotd.py status [--socket PATH] [--prom]\n")
         return 2
-    asyncio.run(serve(Config.from_env(), detect_platform(), log_line))
+    config = Config.from_env()
+    platform: Platform = detect_platform()
+    if config.mem_available_file:
+        platform = OverridablePlatform(platform, config.mem_available_file)
+        log_line("slotd.memory_overridden", {"path": config.mem_available_file, "warning": "for local testing only"})
+    asyncio.run(serve(config, platform, log_line))
     return 0
 
 

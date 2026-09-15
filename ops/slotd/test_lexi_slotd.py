@@ -178,6 +178,33 @@ class PlatformOnThisMachine(unittest.TestCase):
         self.assertEqual(platform.uid_to_name(os.getuid()), pwd_name())
 
 
+class OverridablePlatformReadsAFile(unittest.TestCase):
+    def test_reports_the_file_while_it_holds_a_number_and_the_real_reading_otherwise(self):
+        import tempfile
+        inner = slotd.FakePlatform(mem_available=999)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "mem")
+            wrapped = slotd.OverridablePlatform(inner, path)
+            self.assertEqual(wrapped.mem_available(), 999)          # absent
+            with open(path, "w") as handle:
+                handle.write("123\n")
+            self.assertEqual(wrapped.mem_available(), 123)          # present
+            with open(path, "w") as handle:
+                handle.write("garbage")
+            self.assertEqual(wrapped.mem_available(), 999)          # unparseable
+            open(path, "w").close()
+            self.assertEqual(wrapped.mem_available(), 999)          # empty
+            os.unlink(path)
+            self.assertEqual(wrapped.mem_available(), 999)          # gone again
+        self.assertEqual(wrapped.mem_total(), inner.mem_total())
+        self.assertEqual(wrapped.cpu_count(), inner.cpu_count())
+
+    def test_config_reads_the_override_path(self):
+        self.assertIsNone(slotd.Config.from_env({}).mem_available_file)
+        self.assertIsNone(slotd.Config.from_env({"SLOTD_MEM_AVAILABLE_FILE": ""}).mem_available_file)
+        self.assertEqual(slotd.Config.from_env({"SLOTD_MEM_AVAILABLE_FILE": "/tmp/m"}).mem_available_file, "/tmp/m")
+
+
 class FakePlatformBehaves(unittest.TestCase):
     def test_every_reading_is_settable(self):
         fake = slotd.FakePlatform(mem_total=10, mem_available=5, cpu_count=3, uid=42,
@@ -601,3 +628,38 @@ class PromRendering(unittest.TestCase):
                                   "waitSecondsP50": None, "heldSecondsP50": None, "refused": {},
                                   "memoryBytes": 5, "memAvailable": 9, "holders": {}})
         self.assertNotIn("lexi_slots_wait_seconds_p50", text)
+
+
+# ---------------------------------------------------------------------------
+# Stress harness
+# ---------------------------------------------------------------------------
+import stress
+
+
+class StressHarness(unittest.TestCase):
+    """A tiny run: enough to prove the harness measures what it says it measures."""
+
+    def test_a_small_run_never_exceeds_capacity_and_serves_everyone_in_order(self):
+        summary = stress.run_stress(stress.Options(
+            clients=4, capacity=2, agent_mb=8, hold_seconds=0.5, budget_mb=64, brake="off", quiet=True,
+        ))
+        self.assertEqual(summary.peak_concurrent, 2)
+        self.assertEqual(summary.granted_order, ["client-1", "client-2", "client-3", "client-4"])
+        self.assertEqual(summary.refused, {})
+        self.assertFalse(summary.brake_tripped)
+        self.assertFalse(summary.over_capacity)
+
+    def test_an_injected_memory_dip_holds_the_queue_and_everyone_is_still_served_in_order(self):
+        summary = stress.run_stress(stress.Options(
+            clients=3, capacity=2, agent_mb=8, hold_seconds=1.0, budget_mb=64,
+            brake="inject", brake_inject_seconds=1.0, quiet=True,
+        ))
+        self.assertTrue(summary.brake_tripped)
+        self.assertEqual(summary.granted_order, ["client-1", "client-2", "client-3"])
+        self.assertEqual(summary.refused, {})
+        self.assertFalse(summary.over_capacity)
+
+    def test_refuses_to_start_a_run_that_would_exceed_the_budget(self):
+        with self.assertRaises(stress.BudgetExceeded):
+            stress.run_stress(stress.Options(clients=2, capacity=2, agent_mb=100, hold_seconds=0.1, budget_mb=150,
+                                             brake="off", quiet=True))
