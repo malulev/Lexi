@@ -75,7 +75,9 @@ function buildContainerOptions(
       // daemon unreachable — means no cap, which is exactly today's behavior.
       // `MemorySwap` equal to `Memory`, or the cap is a suggestion the
       // container can swap past.
-      ...(request.memoryBytes ? { Memory: request.memoryBytes, MemorySwap: request.memoryBytes } : {}),
+      ...(request.memoryBytes
+        ? { Memory: request.memoryBytes, MemorySwap: request.memoryBytes }
+        : {}),
       CpuShares: AGENT_CPU_SHARES,
       // `PidsLimit` bounds a fork bomb, which exhausts the host's process
       // table rather than this cgroup — no memory figure would have.

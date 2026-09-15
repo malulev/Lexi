@@ -77,7 +77,10 @@ const slotsThatRefuse: AgentSlots = {
 };
 
 /** Slots that count releases and hand the run a memory cap, like a lease daemon would. */
-function slotsThatLease(): AgentSlots & { readonly releases: number; readonly requestIds: string[] } {
+function slotsThatLease(): AgentSlots & {
+  readonly releases: number;
+  readonly requestIds: string[];
+} {
   let releases = 0;
   const requestIds: string[] = [];
   return {
@@ -232,7 +235,9 @@ describe('a leased slot', () => {
     expect(harness.runner.calls).toHaveLength(0);
     const parsed = parseComment((await harness.client.listComments(pullRequest.number)).at(-1)!);
     expect(parsed.record?.errorCode).toBe('too_busy');
-    expect(parsed.record?.errorDetail).toBe('the host refused an agent slot: projected_wait_exceeds_ceiling');
+    expect(parsed.record?.errorDetail).toBe(
+      'the host refused an agent slot: projected_wait_exceeds_ceiling',
+    );
     expect(parsed.prose).toBe(CLIENT_MESSAGES.too_busy);
     // No queued stage: a refusal is immediate.
     expect(parsed.record?.stages.map((event) => event.stage)).toEqual(['failed']);

@@ -192,13 +192,15 @@ describe('parseEnv', () => {
     });
 
     it('reads the socket path', () => {
-      expect(parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '/run/lexi/slotd.sock' }).slotBrokerSocket).toBe(
-        '/run/lexi/slotd.sock',
-      );
+      expect(
+        parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '/run/lexi/slotd.sock' }).slotBrokerSocket,
+      ).toBe('/run/lexi/slotd.sock');
     });
 
     it('rejects an empty value rather than silently disabling the queue', () => {
-      expect(() => parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '' })).toThrow(/SLOT_BROKER_SOCKET/);
+      expect(() => parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '' })).toThrow(
+        /SLOT_BROKER_SOCKET/,
+      );
     });
   });
 });
