@@ -106,3 +106,178 @@ def compute_capacity(mem_total: int, cpu_count: int, clients: int, config: Confi
     mem_slots = (mem_total - reserve) // config.agent_mem_estimate
     cpu_slots = int(cpu_count * config.cpu_oversubscribe)
     return max(1, min(mem_slots, cpu_slots))
+
+
+# ---------------------------------------------------------------------------
+# Platform: what the daemon needs from the host
+# ---------------------------------------------------------------------------
+
+
+class Platform:
+    """Linux in production, Darwin on a developer's Mac, Fake in tests."""
+
+    def mem_total(self) -> int:
+        raise NotImplementedError
+
+    def mem_available(self) -> int:
+        raise NotImplementedError
+
+    def cpu_count(self) -> int:
+        return os.cpu_count() or 1
+
+    def peer_uid(self, sock: socket.socket) -> int:
+        raise NotImplementedError
+
+    def group_members(self, group: str) -> List[str]:
+        try:
+            return list(grp.getgrnam(group).gr_mem)
+        except KeyError:
+            return []
+
+    def uid_to_name(self, uid: int) -> Optional[str]:
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except KeyError:
+            return None
+
+
+def parse_meminfo(text: str) -> Dict[str, int]:
+    """/proc/meminfo lines ('MemTotal:  3910784 kB') to bytes."""
+    values: Dict[str, int] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, rest = line.split(":", 1)
+        parts = rest.split()
+        if not parts or not parts[0].isdigit():
+            continue
+        amount = int(parts[0])
+        if len(parts) > 1 and parts[1].lower() == "kb":
+            amount *= 1024
+        values[key.strip()] = amount
+    return values
+
+
+def parse_subuid(text: str, uid: int) -> Optional[str]:
+    """The /etc/subuid owner of a subordinate uid, or None if it is nobody's."""
+    for line in text.splitlines():
+        parts = line.strip().split(":")
+        if len(parts) != 3 or not (parts[1].isdigit() and parts[2].isdigit()):
+            continue
+        start, count = int(parts[1]), int(parts[2])
+        if start <= uid < start + count:
+            return parts[0]
+    return None
+
+
+class LinuxPlatform(Platform):
+    def _meminfo(self) -> Dict[str, int]:
+        with open("/proc/meminfo", encoding="utf8") as handle:
+            return parse_meminfo(handle.read())
+
+    def mem_total(self) -> int:
+        return self._meminfo()["MemTotal"]
+
+    def mem_available(self) -> int:
+        return self._meminfo()["MemAvailable"]
+
+    def peer_uid(self, sock: socket.socket) -> int:
+        credentials = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+        _pid, uid, _gid = struct.unpack("3i", credentials)
+        return uid
+
+    def uid_to_name(self, uid: int) -> Optional[str]:
+        # A container process that is not root inside lands in the client's
+        # subordinate range rather than on the client's own uid.
+        name = super().uid_to_name(uid)
+        if name is not None:
+            return name
+        try:
+            with open("/etc/subuid", encoding="utf8") as handle:
+                return parse_subuid(handle.read(), uid)
+        except OSError:
+            return None
+
+
+def parse_vm_stat(text: str) -> int:
+    """
+    macOS `vm_stat` to an approximation of Linux's MemAvailable: pages that
+    are free, inactive, speculative or purgeable, times the page size. Good
+    enough to drive a brake on a developer's Mac; never used in production.
+    """
+    page_size = 4096
+    pages: Dict[str, int] = {}
+    for line in text.splitlines():
+        if "page size of" in line:
+            page_size = int(line.split("page size of")[1].split()[0])
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        value = value.strip().rstrip(".")
+        if value.isdigit():
+            pages[key.strip()] = int(value)
+    wanted = ("Pages free", "Pages inactive", "Pages speculative", "Pages purgeable")
+    return sum(pages.get(key, 0) for key in wanted) * page_size
+
+
+class DarwinPlatform(Platform):
+    # Python does not export these on macOS. getsockopt(SOL_LOCAL, LOCAL_PEERCRED)
+    # fills a struct xucred whose first two fields are the version and the uid;
+    # the rest (group list) is not needed and its layout is not relied on.
+    _SOL_LOCAL = 0
+    _LOCAL_PEERCRED = 0x0001
+    _XUCRED_SIZE = 76
+
+    def mem_total(self) -> int:
+        return int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).decode().strip())
+
+    def mem_available(self) -> int:
+        return parse_vm_stat(subprocess.check_output(["vm_stat"]).decode())
+
+    def peer_uid(self, sock: socket.socket) -> int:
+        credentials = sock.getsockopt(self._SOL_LOCAL, self._LOCAL_PEERCRED, self._XUCRED_SIZE)
+        _version, uid = struct.unpack_from("II", credentials)
+        return uid
+
+
+class FakePlatform(Platform):
+    """Every reading settable: tests, and the harness when it fakes memory."""
+
+    def __init__(
+        self,
+        mem_total: int = 8 * 1024 ** 3,
+        mem_available: int = 4 * 1024 ** 3,
+        cpu_count: int = 4,
+        uid: int = 1000,
+        members: Optional[List[str]] = None,
+        names: Optional[Dict[int, str]] = None,
+    ) -> None:
+        self.total = mem_total
+        self.available = mem_available
+        self.cpus = cpu_count
+        self.uid = uid
+        self.members = list(members or [])
+        self.names: Dict[int, str] = dict(names or {})
+
+    def mem_total(self) -> int:
+        return self.total
+
+    def mem_available(self) -> int:
+        return self.available
+
+    def cpu_count(self) -> int:
+        return self.cpus
+
+    def peer_uid(self, sock: object) -> int:
+        return self.uid
+
+    def group_members(self, group: str) -> List[str]:
+        return list(self.members)
+
+    def uid_to_name(self, uid: int) -> Optional[str]:
+        return self.names.get(uid)
+
+
+def detect_platform() -> Platform:
+    return DarwinPlatform() if sys.platform == "darwin" else LinuxPlatform()

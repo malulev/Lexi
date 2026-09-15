@@ -101,3 +101,91 @@ class Capacity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# Platform
+# ---------------------------------------------------------------------------
+import os
+import socket
+
+
+MEMINFO = """MemTotal:        3910784 kB
+MemFree:          855040 kB
+MemAvailable:    2928640 kB
+Buffers:          123456 kB
+"""
+
+SUBUID = """malulev:100000:65536
+imidan:165536:65536
+claude:231072:65536
+"""
+
+VM_STAT = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                4355.
+Pages active:                            375519.
+Pages inactive:                          373570.
+Pages speculative:                          516.
+Pages throttled:                              0.
+Pages wired down:                        190991.
+Pages purgeable:                          15148.
+"""
+
+
+def pwd_name() -> str:
+    import pwd
+    return pwd.getpwuid(os.getuid()).pw_name
+
+
+class PlatformParsing(unittest.TestCase):
+    def test_meminfo_is_read_in_bytes(self):
+        values = slotd.parse_meminfo(MEMINFO)
+        self.assertEqual(values["MemTotal"], 3910784 * 1024)
+        self.assertEqual(values["MemAvailable"], 2928640 * 1024)
+
+    def test_subuid_maps_a_subordinate_uid_to_its_owner(self):
+        self.assertEqual(slotd.parse_subuid(SUBUID, 165536), "imidan")
+        self.assertEqual(slotd.parse_subuid(SUBUID, 165536 + 65535), "imidan")
+        self.assertEqual(slotd.parse_subuid(SUBUID, 100000), "malulev")
+        self.assertIsNone(slotd.parse_subuid(SUBUID, 99999))
+        self.assertIsNone(slotd.parse_subuid(SUBUID, 1000))
+
+    def test_vm_stat_approximates_available_memory(self):
+        expected = (4355 + 373570 + 516 + 15148) * 16384
+        self.assertEqual(slotd.parse_vm_stat(VM_STAT), expected)
+
+
+class PlatformOnThisMachine(unittest.TestCase):
+    """The one real kernel call: the peer of a socketpair is this process."""
+
+    def test_peer_uid_of_a_socketpair_is_our_own_uid(self):
+        platform = slotd.detect_platform()
+        left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.assertEqual(platform.peer_uid(right), os.getuid())
+        finally:
+            left.close()
+            right.close()
+
+    def test_real_readings_are_positive(self):
+        platform = slotd.detect_platform()
+        self.assertGreater(platform.mem_total(), 0)
+        self.assertGreater(platform.mem_available(), 0)
+        self.assertGreaterEqual(platform.cpu_count(), 1)
+
+    def test_our_own_uid_has_a_name(self):
+        platform = slotd.detect_platform()
+        self.assertEqual(platform.uid_to_name(os.getuid()), pwd_name())
+
+
+class FakePlatformBehaves(unittest.TestCase):
+    def test_every_reading_is_settable(self):
+        fake = slotd.FakePlatform(mem_total=10, mem_available=5, cpu_count=3, uid=42,
+                                  members=["a", "b"], names={42: "a"})
+        self.assertEqual(fake.mem_total(), 10)
+        self.assertEqual(fake.mem_available(), 5)
+        self.assertEqual(fake.cpu_count(), 3)
+        self.assertEqual(fake.peer_uid(None), 42)
+        self.assertEqual(fake.group_members("anything"), ["a", "b"])
+        self.assertEqual(fake.uid_to_name(42), "a")
+        self.assertIsNone(fake.uid_to_name(7))
