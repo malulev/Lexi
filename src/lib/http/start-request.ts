@@ -42,9 +42,13 @@ async function startRequestOrThrow(input: StartInput): Promise<BeginOutcome> {
   const installation = getInstallation();
   const { client, config } = installation;
 
-  // A cold process has never read the repository's settings, and there is no
-  // safe default to invent for a file that says what a change may touch.
-  const settings = await config.ensureLoaded();
+  // Re-read rather than serve the memo: a developer who widens a policy to
+  // unblock a client must not have to wait for the container to be recreated,
+  // and a request is rare enough to afford the read. A cold process has never
+  // read the repository's settings at all, and there is no safe default to
+  // invent for a file that says what a change may touch — so a read that fails
+  // with nothing cached still refuses to start the request.
+  const settings = await config.ensureFresh();
 
   const detail = await readConversation(client, input.conversationNumber);
   if (!detail) throw new Error(`conversation ${input.conversationNumber} does not exist`);

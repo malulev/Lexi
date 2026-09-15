@@ -7,6 +7,7 @@
  * what makes "read on change" safe: a failed refresh never displaces a good
  * config, so access control can never fall open on a bad or unreachable file.
  */
+import { log } from '@/lib/log';
 import type { RepoConfig } from '@/types';
 
 export interface SettingsFault {
@@ -30,6 +31,16 @@ export interface ConfigCache {
    * again, so a later GitHub outage cannot take requests down.
    */
   ensureLoaded(): Promise<RepoConfig>;
+  /**
+   * The config, re-read first — the "on change" half of "at startup and on
+   * change", which nothing used to call. A request start pays one read so a
+   * policy edited on the default branch governs the very next request instead
+   * of waiting for the container to be recreated.
+   *
+   * It cannot fall open: a failed read returns the last good config, and a
+   * process that has never had one still rejects.
+   */
+  ensureFresh(): Promise<RepoConfig>;
 }
 
 export function createConfigCache(
@@ -80,10 +91,24 @@ export function createConfigCache(
     }
   }
 
+  async function ensureFresh(): Promise<RepoConfig> {
+    const result = await refresh();
+    if (result.ok) return result.config;
+    // The read failed, which says nothing about the config it failed to read.
+    // The last good one still governs — falling back to it is the same
+    // guarantee `refresh` already makes about `current`, just made returnable.
+    // Logged rather than silent: a request running on a config the repository
+    // has since changed is exactly the surprise that took a day to diagnose.
+    log.error('config.load_failed', { error: result.fault.message, servingLastGood: !!current });
+    if (current) return current;
+    throw new Error(result.fault.message);
+  }
+
   return {
     current: () => current,
     fault: () => fault,
     refresh,
     ensureLoaded,
+    ensureFresh,
   };
 }

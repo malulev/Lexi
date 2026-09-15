@@ -19,7 +19,7 @@ function makeConfig(model: string): RepoConfig {
       maxFilesChanged: 15,
       maxDiffLines: 800,
       forbidNewDependencies: true,
-  forbidExternalCode: true,
+      forbidExternalCode: true,
     },
     guidance: '',
   };
@@ -166,6 +166,73 @@ describe('createConfigCache', () => {
 
       await expect(cache.ensureLoaded()).rejects.toThrow('transient');
       await expect(cache.ensureLoaded()).resolves.toEqual(makeConfig('recovered'));
+    });
+  });
+
+  /**
+   * The other half of FR-003f's "at startup and on change". A policy edited on
+   * the default branch used to take effect only when the container was
+   * recreated, because nothing in the process ever called refresh: a developer
+   * who widened a policy to unblock a client watched the same refusal repeat.
+   * `ensureFresh` is what a request start calls; page renders keep
+   * `ensureLoaded`, so the cost is one read per request, not per page view.
+   */
+  describe('ensureFresh', () => {
+    it('reads again on every call, so a change on the default branch takes effect', async () => {
+      const load = vi
+        .fn()
+        .mockResolvedValueOnce(makeConfig('before'))
+        .mockResolvedValueOnce(makeConfig('after'));
+      const cache = createConfigCache(load);
+
+      await expect(cache.ensureFresh()).resolves.toEqual(makeConfig('before'));
+      await expect(cache.ensureFresh()).resolves.toEqual(makeConfig('after'));
+      expect(load).toHaveBeenCalledTimes(2);
+    });
+
+    it('serves the last good config when the read fails, and records the fault', async () => {
+      const load = vi
+        .fn()
+        .mockResolvedValueOnce(makeConfig('good'))
+        .mockRejectedValueOnce(new Error('github is unreachable'));
+      const cache = createConfigCache(load);
+
+      await cache.ensureFresh();
+
+      // A GitHub outage must not take requests down, and must not widen access.
+      await expect(cache.ensureFresh()).resolves.toEqual(makeConfig('good'));
+      expect(cache.fault()?.message).toMatch(/unreachable/);
+    });
+
+    it('logs the failed read, saying whether a last good config is being served', async () => {
+      const lines: string[] = [];
+      const stdout = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+        lines.push(String(chunk));
+        return true;
+      });
+      const load = vi
+        .fn()
+        .mockResolvedValueOnce(makeConfig('good'))
+        .mockRejectedValueOnce(new Error('github is unreachable'));
+      const cache = createConfigCache(load);
+
+      await cache.ensureFresh();
+      await cache.ensureFresh();
+      stdout.mockRestore();
+
+      const line = lines
+        .map((raw) => JSON.parse(raw))
+        .find((l) => l.event === 'config.load_failed');
+      expect(line).toMatchObject({ level: 'error', servingLastGood: true });
+      expect(line.error).toMatch(/unreachable/);
+    });
+
+    it('throws when the read fails and there is no last good config to serve', async () => {
+      const load = vi.fn().mockRejectedValue(new Error('config.yml: file is required'));
+      const cache = createConfigCache(load);
+
+      await expect(cache.ensureFresh()).rejects.toThrow('config.yml: file is required');
+      expect(cache.current()).toBeNull();
     });
   });
 });
