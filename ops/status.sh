@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 # One line per client, and the one number that is nobody else's job to know.
 #
 # Under this topology every client has its own rootless daemon, so there is no
@@ -9,13 +11,13 @@ set -euo pipefail
 # lives on a daemon root is not talking to. This script is that missing view:
 # it asks each client's daemon in turn and adds the answers up.
 #
-# The agent count matters more than it looks. The application counts running
-# agent containers on ITS daemon to decide whether a request may start
-# (src/lib/runner/slots.ts), and it calls that count host-wide, because it was
-# written for a host where every installation shared one daemon. Here it is per
-# client. Twenty clients at MAX_CONCURRENT_RUNS=2 is a host ceiling of forty
-# concurrent agents and roughly 40 GB of RAM, and nothing in the application
-# will ever tell you that. The TOTAL line below is where you find out.
+# The agent count matters more than it looks. Each installation serves one
+# site and its site lock bounds it to one run at a time, so the host's ceiling
+# is the number of clients — every one of them could be running an agent at
+# once, and nothing in the application can see across installations to stop
+# it. The TOTAL line below is where you find out how close that is. Host-wide
+# admission is the lease daemon designed in
+# docs/superpowers/specs/2026-09-14-host-admission-queue-design.md.
 #
 # Read-only. It starts nothing, stops nothing and writes nothing.
 
@@ -206,9 +208,7 @@ report_client() {
     count="$(run_as_client "$slug" docker ps --filter 'label=webagent.agent=true' --quiet 2>/dev/null | grep -c . || true)"
     [ -n "$count" ] || count=0
 
-    limit="$(read_env_value "$env_file" MAX_CONCURRENT_RUNS)"
-    [ -n "$limit" ] || limit="2(default)"
-    agents="${count}/${limit}"
+    agents="${count}"
   fi
 
   port="$(read_env_value "$env_file" PORT_HOST)"
@@ -263,17 +263,18 @@ print_logs() {
 # — so quoting them is the whole escaping problem.
 # Prometheus text format. Written from the same rows as everything else.
 #
-# `lexi_agents_limit_total` is the line this whole file exists to produce: the
-# application can only ever ask its own daemon how many agents are running, so
-# the SUM of every client's ceiling against the host's actual memory is a
-# number nothing in the product can see. An alert needs it.
+# `lexi_clients_total` is the line this whole file exists to produce: each
+# client can run one agent at a time and nothing in the product can see across
+# clients, so the number of clients IS the host's agent ceiling, and that
+# ceiling against the host's actual memory is a number only this script can
+# report. An alert needs it.
 #
 # Label discipline: `slug` only, and it is bounded by the number of clients.
 # The image tag rides a separate info metric with a constant value of 1 — the
 # standard pattern — so a release churns one series per client instead of
 # multiplying every gauge by every version ever deployed.
 emit_prom() {
-  local row slug daemon app http ready agents image running limit total_limit=0 healthy state_bytes
+  local row slug daemon app http ready agents image running healthy state_bytes
 
   echo '# HELP lexi_client_app_up The client application container is running.'
   echo '# TYPE lexi_client_app_up gauge'
@@ -311,18 +312,11 @@ emit_prom() {
 
   echo '# HELP lexi_client_agents_running Agent containers on that client daemon.'
   echo '# TYPE lexi_client_agents_running gauge'
-  echo '# HELP lexi_client_agents_limit MAX_CONCURRENT_RUNS for that client.'
-  echo '# TYPE lexi_client_agents_limit gauge'
   for row in "${rows[@]}"; do
     slug="$(printf '%s' "$row" | cut -f1)"
-    agents="$(printf '%s' "$row" | cut -f6)"
-    running="$(printf '%s' "$agents" | cut -d/ -f1)"
-    limit="$(printf '%s' "$agents" | cut -d/ -f2 | grep -oE '^[0-9]+' || echo 0)"
+    running="$(printf '%s' "$row" | cut -f6)"
     case "$running" in '' | *[!0-9]*) running=0 ;; esac
-    case "$limit" in '' | *[!0-9]*) limit=0 ;; esac
-    total_limit=$((total_limit + limit))
     echo "lexi_client_agents_running{slug=\"${slug}\"} ${running}"
-    echo "lexi_client_agents_limit{slug=\"${slug}\"} ${limit}"
   done
 
   echo '# HELP lexi_client_info Deployed image and commit, as labels on a constant.'
@@ -349,9 +343,9 @@ emit_prom() {
   echo '# HELP lexi_agents_running_total Agent containers across every client daemon.'
   echo '# TYPE lexi_agents_running_total gauge'
   echo "lexi_agents_running_total ${TOTAL_AGENTS}"
-  echo '# HELP lexi_agents_limit_total Summed MAX_CONCURRENT_RUNS across clients. Compare with free memory.'
-  echo '# TYPE lexi_agents_limit_total gauge'
-  echo "lexi_agents_limit_total ${total_limit}"
+  echo '# HELP lexi_clients_total Clients on this host. Each runs at most one agent, so this is the agent ceiling; compare with free memory.'
+  echo '# TYPE lexi_clients_total gauge'
+  echo "lexi_clients_total ${#clients[@]}"
   echo '# HELP lexi_clients_unhealthy Clients failing daemon, app or HTTP.'
   echo '# TYPE lexi_clients_unhealthy gauge'
   echo "lexi_clients_unhealthy ${#UNHEALTHY[@]}"
@@ -373,10 +367,9 @@ emit_json() {
     image="$(printf '%s' "$row" | cut -f7)"
     [ "$first" -eq 1 ] || printf ','
     first=0
-    printf '{"slug":"%s","daemon":"%s","app":"%s","http":"%s","ready":"%s","agents_running":%s,"agents_limit":%s,"image":"%s","healthy":%s}' \
+    printf '{"slug":"%s","daemon":"%s","app":"%s","http":"%s","ready":"%s","agents_running":%s,"image":"%s","healthy":%s}' \
       "$slug" "$daemon" "$app" "${http#*\ }" "$ready" \
-      "$(printf '%s' "$agents" | cut -d/ -f1 | grep -E '^[0-9]+$' || echo 0)" \
-      "$(printf '%s' "$agents" | cut -d/ -f2 | grep -oE '^[0-9]+' || echo 0)" \
+      "$(printf '%s' "$agents" | grep -E '^[0-9]+$' || echo 0)" \
       "$image" \
       "$(is_healthy "$row" && echo true || echo false)"
   done
@@ -402,7 +395,8 @@ main() {
     rows+=("$row")
     agents_field="$(printf '%s' "$row" | cut -f6)"
     case "$agents_field" in
-      [0-9]*/*) TOTAL_AGENTS=$((TOTAL_AGENTS + ${agents_field%%/*})) ;;
+      '' | *[!0-9]*) ;;
+      *) TOTAL_AGENTS=$((TOTAL_AGENTS + agents_field)) ;;
     esac
     is_healthy "$row" || UNHEALTHY+=("$slug")
   done
@@ -437,7 +431,16 @@ main() {
 
   echo
   echo "TOTAL agent containers running across ${#clients[@]} client daemon(s): ${TOTAL_AGENTS}"
-  echo "Each is roughly 1 GB of RAM. The per-client AGENTS limits above are per daemon, so the host ceiling is their sum."
+  echo "Each holds roughly 400 MB of RAM. Every client can run one at a time, so ${#clients[@]} is this host's ceiling."
+  if [ -S /run/lexi/slotd.sock ]; then
+    if slots_json="$(python3 "${SCRIPT_DIR}/slotd/lexi_slotd.py" status --socket /run/lexi/slotd.sock 2>/dev/null)"; then
+      echo "SLOTS $(printf '%s' "$slots_json" | python3 -c 'import json,sys; s=json.load(sys.stdin); print(f"capacity {s[\"capacity\"]}, leased {s[\"leased\"]}, queued {s[\"queued\"]}, braked {\"yes\" if s[\"braked\"] else \"no\"}, refused {sum(s[\"refused\"].values())}")')"
+    else
+      echo "SLOTS daemon socket present but not answering — systemctl status lexi-slotd"
+    fi
+  else
+    echo "SLOTS no admission daemon on this host (ops/bootstrap-host.sh installs it); ceiling is the client count above"
+  fi
 
   if [ "$SHOW_LOGS" -eq 1 ]; then
     for slug in "${clients[@]}"; do print_logs "$slug"; done

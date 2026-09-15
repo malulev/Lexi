@@ -44,16 +44,15 @@ ops/status.sh --json                   # the same facts, for a script
 ops/status.sh --quiet                  # exit status only, for a timer
 ```
 
-
 ## The scripts
 
-| Script | Run as | When |
-|---|---|---|
-| `bootstrap-host.sh` | root | Once per VPS. Docker, the rootless prerequisites, `/srv/lexi`, the registry, a Compose ≥ 2.17 check. |
-| `provision-client.sh <slug> <hostname> <port>` | root | Once per client. The user, its rootless daemon, the 0700 tree, a `.env` skeleton. Starts nothing. |
-| `release.sh [git-ref]` | root | Every deploy. Builds and pushes both images, then rolls each client forward one at a time. `--client <slug>` for one. |
-| `status.sh [<slug>]` | root | Any time. One line per client, plus the host-wide agent total. `--logs` to see why one is unhappy. |
-| `launch-client.sh <slug> <hostname> [port]` | root | The four steps above for one new client, in order, with the hand steps between them: opens `.env` in an editor, mints the secrets, runs `check:env`, waits for DNS, adds the Caddy block, checks HTTPS. Re-run after a failure; it resumes. |
+| Script                                         | Run as | When                                                                                                                                                                                                                                        |
+| ---------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bootstrap-host.sh`                            | root   | Once per VPS. Docker, the rootless prerequisites, `/srv/lexi`, the registry, a Compose ≥ 2.17 check.                                                                                                                                        |
+| `provision-client.sh <slug> <hostname> <port>` | root   | Once per client. The user, its rootless daemon, the 0700 tree, a `.env` skeleton. Starts nothing.                                                                                                                                           |
+| `release.sh [git-ref]`                         | root   | Every deploy. Builds and pushes both images, then rolls each client forward one at a time. `--client <slug>` for one.                                                                                                                       |
+| `status.sh [<slug>]`                           | root   | Any time. One line per client, plus the host-wide agent total. `--logs` to see why one is unhappy.                                                                                                                                          |
+| `launch-client.sh <slug> <hostname> [port]`    | root   | The four steps above for one new client, in order, with the hand steps between them: opens `.env` in an editor, mints the secrets, runs `check:env`, waits for DNS, adds the Caddy block, checks HTTPS. Re-run after a failure; it resumes. |
 
 All four are idempotent. All four refuse rather than guess.
 
@@ -137,22 +136,33 @@ once, as `<slug>`, so the container process never traverses the parent at all.
 `provision-client.sh` re-applies both modes on every run. If you change them by hand, re-run it
 with `--force`.
 
-### 2. `MAX_CONCURRENT_RUNS` is now per client, not host-wide
+### 2. The host admits agents through one queue
 
-The application counts running agent containers on **its own** daemon to decide whether a
-request may start (`src/lib/runner/slots.ts`), and its comments — and the root README — call
-that count host-wide. That was true when every installation shared one daemon. Under this
-topology each client has its own, so:
+Each installation serves one site, and its site lock bounds it to one run at a time. Across
+installations, `lexi-slotd` (`ops/slotd/`) decides how many agents run at once: a capacity
+computed from the host's RAM and CPUs, a live check of available memory before every grant,
+FIFO order, and a lease that lasts exactly as long as the app's connection to it. Design and
+measurements: `docs/superpowers/specs/2026-09-14-host-admission-queue-design.md`.
 
-**the host total is the sum across clients, and nothing in the application will ever tell you
-that.**
+`ops/bootstrap-host.sh` installs it; `ops/provision-client.sh` enrols each client in the
+`lexi-slots` group (the daemon's authorization list and its client count) and writes
+`SLOT_BROKER_SOCKET` into the client's `.env`. Remove that line and the installation runs
+without the queue, exactly as before — the app fails open if the daemon is unreachable.
 
-Budget roughly **1 GB of RAM per concurrent run**, on top of one app container per client.
-Twenty clients at `MAX_CONCURRENT_RUNS=2` is a ceiling of forty concurrent agents and about
-40 GB — on a box that was probably sized for a tenth of it. Pick the per-client number from the
-host's RAM divided by the number of clients, not from the root README's rule of thumb, and
-check the real figure with `ops/status.sh`, whose `TOTAL` line is the only place it is
-reported.
+Tune it in `/etc/lexi/slots.env` (`ops/slotd/slots.env.example` explains every number), then
+`systemctl reload lexi-slotd`. Read it with `python3 ops/slotd/lexi_slotd.py status`, in the
+`SLOTS` line of `ops/status.sh`, and as `lexi_slots_*` in monitoring.
+
+Budget roughly **400 MB of RAM per running agent** (measured 2026-09-14), on top of one app
+container (~160 MB) per client. On a 3.8 GB, 2 vCPU host that is a capacity of 4, whatever the
+client count; the rest queue.
+
+To see it work without a host: `npm run stress:slotd` starts the daemon on your Mac with eight
+fake clients that allocate real memory, inside a budget of a quarter of your RAM by default.
+
+The per-client `MAX_CONCURRENT_RUNS` setting that used to live here was removed on 2026-09-15:
+counted on a per-client daemon and sitting above a lock that already allows one, it never
+bound anything.
 
 ## Notes
 
@@ -168,5 +178,5 @@ reported.
 - **Backups.** Each client's `.env`, which holds the authenticator secret. That is the entire list; `state/` is a
   cache that rebuilds itself, and everything else lives in GitHub and Netlify.
 - **A client's daemon after a reboot.** `loginctl enable-linger` plus `systemctl --user enable
-  docker` is what brings it back with nobody logged in. `provision-client.sh` does both; if a
+docker` is what brings it back with nobody logged in. `provision-client.sh` does both; if a
   client is `daemon: down` in `status.sh` after a reboot, that pair is what to check.

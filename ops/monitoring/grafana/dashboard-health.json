@@ -288,7 +288,7 @@
       "type": "timeseries",
       "title": "Memory available vs projected agent demand",
       "id": 5,
-      "description": "No swap on this box. The demand line is lexi_agents_limit_total (summed MAX_CONCURRENT_RUNS, 3 today) times the ~400 MB a measured agent run actually holds \u2014 not the 1 GB cap, which was removed from docker.ts because it never bound a real run. When available crosses below it, a concurrency spike is an OOM kill rather than a slow request.",
+      "description": "No swap on this box. The demand line is what the admission daemon admits at once (lexi_slots_capacity; before it is installed, the client count) times the ~400 MB a measured agent run holds. When available crosses below it, the ceiling is wrong for this host.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -307,8 +307,8 @@
         },
         {
           "refId": "B",
-          "expr": "lexi_agents_limit_total{project=\"lexi\"} * 419430400",
-          "legendFormat": "projected agent demand"
+          "expr": "(lexi_slots_capacity{project=\"lexi\"} or lexi_clients_total{project=\"lexi\"}) * 419430400",
+          "legendFormat": "agent demand at capacity"
         }
       ],
       "fieldConfig": {
@@ -410,9 +410,9 @@
     },
     {
       "type": "timeseries",
-      "title": "Agent containers running vs limit",
+      "title": "Agent containers running per client",
       "id": 8,
-      "description": "lexi_client_agents_limit is that client's MAX_CONCURRENT_RUNS. Running pinned at the limit is what queueing looks like from outside.",
+      "description": "Each client runs at most one agent at a time (the site lock), so a client pinned at 1 is a client whose next request waits on the lock. Total across clients is the host's live agent load.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -428,11 +428,6 @@
           "refId": "A",
           "expr": "lexi_client_agents_running{project=\"lexi\", slug=~\"$slug\"}",
           "legendFormat": "{{slug}} running"
-        },
-        {
-          "refId": "B",
-          "expr": "lexi_client_agents_limit{project=\"lexi\", slug=~\"$slug\"}",
-          "legendFormat": "{{slug}} limit"
         }
       ],
       "fieldConfig": {

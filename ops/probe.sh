@@ -76,6 +76,22 @@ fi
   echo "lexi_probe_last_success_timestamp_seconds $(date +%s)"
 } >>"$tmp"
 
+# The admission daemon's own view. Absent socket: no lines, no failure — a
+# host without the daemon is not a broken host. A socket that does not answer
+# is a fault worth the line below, but still not a reason to publish nothing.
+if [ -S /run/lexi/slotd.sock ]; then
+  {
+    echo '# HELP lexi_slots_up 1 when the admission daemon answered.'
+    echo '# TYPE lexi_slots_up gauge'
+  } >>"$tmp"
+  if python3 "${SCRIPT_DIR}/slotd/lexi_slotd.py" status --socket /run/lexi/slotd.sock --prom >>"$tmp" 2>/dev/null; then
+    echo 'lexi_slots_up 1' >>"$tmp"
+  else
+    echo "probe: lexi-slotd did not answer on /run/lexi/slotd.sock" >&2
+    echo 'lexi_slots_up 0' >>"$tmp"
+  fi
+fi
+
 chmod 644 "$tmp"
 mv -- "$tmp" "${TEXTFILE_DIR}/lexi.prom"
 trap - EXIT

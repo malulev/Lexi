@@ -52,7 +52,7 @@ proves only that the timer runs.
    /opt/prosel/src/ops/install-monitoring.sh --with-alloy
    ```
 
-4. Confirm: `systemctl status alloy`, then look for `lexi_agents_limit_total`
+4. Confirm: `systemctl status alloy`, then look for `lexi_clients_total`
    in Grafana's metrics explorer.
 
 ## Phase 3 — alerts
@@ -103,7 +103,8 @@ queries. The short version:
 - **Spend per client per day** — the aggregate the per-request ceiling cannot see.
 - **Publish rate** — previews the client chose *not* to ship. The product-quality metric.
 - **Undo count** — they published, then rejected it. Worse than a preview never published.
-- **Memory available vs `lexi_agents_limit_total`** — this host is oversubscribed by design; this is how you find out before the kernel decides.
+- **Memory available vs `lexi_slots_capacity × 400 MB`** (before the daemon is installed, `lexi_clients_total`) — what the host admits at once against what it has; this is how you find out the ceiling is wrong before the kernel decides.
+- **`lexi_slots_queued` and `lexi_slots_refused_total`** — the admission queue's early warning. Queued for minutes means clients are waiting on each other; refused means one was told to come back later. Both say "more RAM or another host".
 
 ## Constraints worth knowing before you extend it
 
@@ -135,8 +136,8 @@ queries. The short version:
   defaults to 0 when absent. Nothing here can detect spend the agent
   under-reports. The ground truth is OpenRouter's own API; a monthly
   reconciliation is not yet built.
-- `lexi_client_agents_running` is a poll, and `slots.ts` documents its own
-  check-then-act race, so a momentary count above the limit is expected
-  behaviour rather than a fault. That is why A5 carries a 15-minute window.
+- `lexi_client_agents_running` is a poll, so a run finishing between two
+  scrapes shows as a brief dip or spike rather than a fault. That is why A5
+  carries a 15-minute window.
 - Grafana Cloud's free allowances and retention change. Verify them against
   current published limits rather than against any number written here.
