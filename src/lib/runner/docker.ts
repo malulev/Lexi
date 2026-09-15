@@ -27,6 +27,15 @@ import { log } from '@/lib/log';
 /** Enough for node plus the agent's own children; far below the host's table. */
 export const AGENT_PIDS_LIMIT = 512;
 
+/**
+ * Half the default weight (1024). When the CPUs saturate — and on the
+ * measured host they did at four agents — the kernel gives client apps and
+ * the reverse proxy twice an agent's share, so the sites stay responsive
+ * through the burst. Weight, not a quota: an idle host still gives an agent
+ * everything.
+ */
+export const AGENT_CPU_SHARES = 512;
+
 export interface CreateDockerRunnerOptions {
   image: string;
   apiKey: string;
@@ -52,23 +61,24 @@ function buildContainerOptions(
     Env: [`OPENROUTER_API_KEY=${apiKey}`, `MODEL=${request.model}`],
     WorkingDir: '/work',
     Tty: false,
-    // Counted by slots.ts across every installation on this host. The request
-    // id is for a developer reading `docker ps`, nothing reads it back.
+    // Counted by ops/status.sh for the host's running-agent metric. The
+    // request id is for a developer reading `docker ps`, nothing reads it back.
     Labels: { [AGENT_LABEL]: 'true', 'webagent.request': request.requestId },
     HostConfig: {
       Binds: [`${request.workDir}:/work`, `${request.controlDir}:/control`],
       CapDrop: ['ALL'],
       SecurityOpt: ['no-new-privileges'],
-      // Memory is deliberately not capped here. A measured run holds ~400 MB,
-      // so the 1 GB cap this once carried never bound a real run; it only
-      // suggested the host was protected when it was not. Saturating a
-      // 2 vCPU / 3.8 GB host took eight concurrent agents to 0 MB available
-      // and load 115 — an outcome a per-container cap at any value above the
-      // working set does not change. `MAX_CONCURRENT_RUNS` is what holds the
-      // host inside its budget, and `slots.ts` is where its overshoot lives.
-      //
-      // `PidsLimit` stays: a fork bomb exhausts the host's process table
-      // rather than this cgroup, which no memory figure would have bounded.
+      // The memory cap is not this module's opinion. The admission daemon
+      // (ops/slotd) hands each run its cap with the grant, so how many agents
+      // fit and how big each may get come from one configuration on the host
+      // and cannot drift apart. No grant — a development machine, or the
+      // daemon unreachable — means no cap, which is exactly today's behavior.
+      // `MemorySwap` equal to `Memory`, or the cap is a suggestion the
+      // container can swap past.
+      ...(request.memoryBytes ? { Memory: request.memoryBytes, MemorySwap: request.memoryBytes } : {}),
+      CpuShares: AGENT_CPU_SHARES,
+      // `PidsLimit` bounds a fork bomb, which exhausts the host's process
+      // table rather than this cgroup — no memory figure would have.
       PidsLimit: AGENT_PIDS_LIMIT,
       // NOT `LogConfig: { Type: 'none' }`, however much this wants to be.
       //

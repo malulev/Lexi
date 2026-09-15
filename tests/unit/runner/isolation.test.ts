@@ -112,7 +112,7 @@ describe('container environment', () => {
     ]);
   });
 
-  it('bounds the process count one agent run may take, and leaves memory uncapped', async () => {
+  it('applies the memory cap the host handed over with the grant, and yields CPU to the apps', async () => {
     const calls: Docker.ContainerCreateOptions[] = [];
     const runner = createDockerRunner({
       image: 'webagent-agent:test',
@@ -126,24 +126,49 @@ describe('container environment', () => {
       prompt: samplePrompt,
       model: 'openrouter/anthropic/claude-sonnet-latest',
       timeoutMs: 10_000,
+      memoryBytes: 838_860_800,
     };
 
     await runner.run(request);
 
     const host = calls[0]?.HostConfig;
-    // Deliberately uncapped. A measured run holds ~400 MB, so a 1 GB cap
-    // never bound one and only obscured where the real ceiling is: a
-    // stress test on a 2 vCPU / 3.8 GB host exhausted RAM at eight
-    // concurrent agents whether or not each was capped. MAX_CONCURRENT_RUNS
-    // is the control that actually holds the host inside its budget.
-    expect(host?.Memory).toBeUndefined();
-    expect(host?.MemorySwap).toBeUndefined();
-    // Kept: a fork bomb exhausts the host's process table regardless of how
-    // much memory any one run is allowed, which is a different failure.
+    // The cap comes from the admission daemon's grant, so capacity and cap
+    // share one configuration and cannot drift apart. Equal MemorySwap, or
+    // the cap is a suggestion the container can swap past.
+    expect(host?.Memory).toBe(838_860_800);
+    expect(host?.MemorySwap).toBe(838_860_800);
+    // Half the default weight: when CPU saturates, client apps and the reverse
+    // proxy win. The most direct answer to "without impairing existing ones".
+    expect(host?.CpuShares).toBe(512);
     expect(host?.PidsLimit).toBe(512);
-    // The existing narrowing must survive the change.
     expect(host?.CapDrop).toEqual(['ALL']);
     expect(host?.SecurityOpt).toEqual(['no-new-privileges']);
+  });
+
+  it('leaves memory uncapped when no host set one, and still yields CPU', async () => {
+    const calls: Docker.ContainerCreateOptions[] = [];
+    const runner = createDockerRunner({
+      image: 'webagent-agent:test',
+      apiKey: 'or-key-abc123',
+      docker: createFakeDocker(calls),
+    });
+    const request: RunRequest = {
+      requestId: 'req-4',
+      workDir: '/srv/webagent/jobs/req-4/work',
+      controlDir: '/srv/webagent/jobs/req-4/control',
+      prompt: samplePrompt,
+      model: 'openrouter/anthropic/claude-sonnet-latest',
+      timeoutMs: 10_000,
+    };
+
+    await runner.run(request);
+
+    const host = calls[0]?.HostConfig;
+    // No daemon (a development machine, or fail-open): today's behaviour.
+    expect(host?.Memory).toBeUndefined();
+    expect(host?.MemorySwap).toBeUndefined();
+    expect(host?.CpuShares).toBe(512);
+    expect(host?.PidsLimit).toBe(512);
   });
 
   it('refuses to run when controlDir is inside workDir, before ever touching Docker', async () => {
