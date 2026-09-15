@@ -3,7 +3,8 @@
 // ---------------------------------------------------------------------------
 // LABEL DISCIPLINE — read before adding anything
 // ---------------------------------------------------------------------------
-// Only `job`, `slug`, `unit`, `level`, `event` and `stream` may be labels.
+// Only `job`, `slug`, `host`, `unit`, `level`, `event` and `stream` may be
+// labels. `filename` is dropped below — it arrives on its own and is not one.
 //
 // Everything else stays a *field* inside the JSON line, parsed at query time
 // with `| json`, which in Loki costs nothing. `requestId`, `conversationNumber`,
@@ -186,10 +187,22 @@ loki.process "lexi" {
     values = { level = "level", event = "event" }
   }
 
+  // `loki.source.file` attaches `filename` to every entry by itself, and the
+  // value holds the container ID — so each `ops/release.sh` recreates the app
+  // container, mints a new ID, and starts a brand new stream that never ends.
+  // A slow leak of the free tier's series allowance, and visible long before
+  // that: a dashboard panel that unwraps a field without an outer aggregation
+  // silently returns one series per container generation.
+  stage.label_drop {
+    values = ["filename"]
+  }
+
   // Same reason as external_labels on the metrics side: one stack, several
-  // projects.
+  // projects. `host` is the log-side counterpart of the `instance` label Alloy
+  // puts on every metric by itself — without it, a second box's lines are
+  // indistinguishable from this one's.
   stage.static_labels {
-    values = { project = "lexi" }
+    values = { project = "lexi", host = constants.hostname }
   }
   stage.timestamp {
     source = "ts"
@@ -209,15 +222,20 @@ loki.write "grafana" {
 
 // --- host journal ----------------------------------------------------------
 //
-// Caddy, dockerd, sshd and the per-client rootless daemons. Caddy's access
-// logs are here too, which is per-client HTTP status and latency for no
-// application code at all.
+// Caddy, dockerd, sshd and the per-client rootless daemons.
+//
+// Caddy access logs are NOT here, whatever you may have read: Caddy v2 emits
+// them only where a site block carries a `log` directive, and /etc/caddy/
+// Caddyfile is two bare `reverse_proxy` lines (verified 2026-09-15 —
+// `journalctl -u caddy` is empty). Adding `log { output stderr }` to each site
+// buys per-client HTTP status, latency and 5xx rate for no application code;
+// until then nothing in this stack sees the reverse proxy's view of a request.
 loki.source.journal "host" {
   forward_to = [loki.write.grafana.receiver]
   // Namespaced deliberately: a bare job="systemd" collides with every other
   // host that ships a journal to the same stack, and the two sets are
   // indistinguishable once mixed.
-  labels     = { job = "lexi-host", project = "lexi" }
+  labels     = { job = "lexi-host", project = "lexi", host = constants.hostname }
   relabel_rules = loki.relabel.journal.rules
   max_age    = "12h"
 }

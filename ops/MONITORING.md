@@ -72,7 +72,7 @@ each client — that is the only check that sees DNS, Caddy and the certificate.
 | `ops/status.sh --prom` → textfile | per-client app/daemon/health/readiness, agents running vs limit, **summed ceiling across clients**, image and commit, maintenance flag |
 | `prometheus.exporter.unix` | CPU, memory, load, disk, filesystem, per-unit systemd state |
 | container logs → Loki | every `request.ended`: outcome, errorCode, duration and per-stage durations, cost, tokens, files changed |
-| journald → Loki | Caddy access logs (per-client HTTP status and latency, free), dockerd, sshd, each client's rootless daemon |
+| journald → Loki | dockerd, sshd, each client's rootless daemon, and Caddy's *service* log. **Not** Caddy access logs: v2 writes those only where a site block carries a `log` directive, and the Caddyfile has none — so per-client HTTP status and latency are not collected today |
 | heartbeat service | the one signal that survives the box being gone |
 
 ## Where to look
@@ -82,15 +82,20 @@ queries. The short version:
 
 - **On the box, no accounts:** `cd /tmp && ops/status.sh` for fleet state,
   `ops/status.sh <slug> --logs` for one client's JSON log,
-  `journalctl -u caddy` for HTTP access logs, and
+  `journalctl -u caddy` for the proxy's own service log (access logs are off
+  — see the table above), and
   `/var/lib/node_exporter/textfile/lexi.prom` for what the collector reads.
 - **Per request:** the durable record is a comment on the pull request in the
   client's repository — outcome, cost, tokens, per-stage timestamps, and the
   agent's last output lines, which exist nowhere else by design.
 - **In Grafana:** Explore → Loki for `{job="lexi"}`, Explore → Prometheus for
   `lexi_*` and `node_*`, Alerting → Alert rules for what is firing.
-- **Dashboard:** build the eleven panels listed in ROLLOUT.md, and import the
-  prebuilt Node Exporter Full dashboard (ID `1860`) for the host view.
+- **Dashboards:** import `monitoring/grafana/dashboard-health.json` (is it up,
+  per client, right now) and `monitoring/grafana/dashboard-requests.json` (did
+  the requests work, why were they slow, what did they cost). Dashboards → New
+  → Import → Upload JSON file, then pick the Prometheus and Loki data sources
+  when prompted. Add the prebuilt Node Exporter Full dashboard (ID `1860`) for
+  the deep host view.
 
 ## The numbers a person should look at
 

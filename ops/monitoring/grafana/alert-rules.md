@@ -15,6 +15,53 @@ worse than no rule because it looks like coverage.
 
 ---
 
+## The minimum set — start here
+
+Five rules. Everything below this section is the full catalogue; enter it later,
+or never. These five are chosen for one property: **the dead-man's switch
+cannot raise any of them.**
+
+The heartbeat already says "the box is alive and every client is healthy". It
+says it in one bit, with no client identity, and it stays green while the app
+serves 200 to a client whose every request is failing. That is the gap these
+close.
+
+| # | Rule | Query | For | The failure it catches |
+|---|---|---|---|---|
+| M1 | Which client is down | `lexi_client_health_ok == 0 unless on() lexi_maintenance == 1` | 5m | Turns a red heartbeat into a client name. Without it you SSH in to find out who. |
+| M2 | Credential expired | `lexi_client_ready_ok == 0 unless on() lexi_maintenance == 1` | 15m | GitHub or Netlify stopped answering. `startup.ts` runs once at boot, so nothing else notices until a client's request fails. |
+| M3 | **Requests failing** | `sum by (slug) (count_over_time({job="lexi", event="request.ended"} \| json \| outcome="failed" [15m])) >= 3` | 0m | App up, health 200, heartbeat green, **every request failing**. This happened on 2026-09-14 on a `:free` model and nothing could report it. M1, M2 and M4 all stay green throughout. |
+| M4a | RAM | `node_memory_MemAvailable_bytes{project="lexi"} < 400e6` | 5m | No swap on this box: this is an OOM countdown, and the kill can just as easily take Caddy as an agent. |
+| M4b | Disk | `1 - node_filesystem_avail_bytes{project="lexi", mountpoint="/"} / node_filesystem_size_bytes{project="lexi", mountpoint="/"} > 0.85` | 10m | Shared by every client. A full disk corrupts a git mirror mid-clone and no restart fixes it. |
+| M5 | Runaway spend | `sum by (slug) (sum_over_time({job="lexi", event="request.ended"} \| json \| unwrap costUsd [1d])) > 5` | 0m | Ten requests at 90% of the per-request ceiling cost 9x the ceiling and raise nothing today. |
+
+M3 is the one to enter first if you only enter one.
+
+Add next, when there is a spare ten minutes: A6 (lock leak — a silent total
+outage for one client behind a healthy-looking app) and A12 (auth burst).
+
+### Contact point
+
+One email contact point, all five rules. Grafana Cloud sends from its own
+infrastructure, not from `SMTP_URL` — see the delivery note at the foot of this
+file. Put `{{ $labels.slug }}` in every summary; a rule that cannot name the
+client is only marginally better than the heartbeat.
+
+### Dashboards
+
+Two, both in this directory, importable as-is (Dashboards -> New -> Import ->
+Upload JSON file, then pick the Prometheus and Loki data sources when prompted):
+
+- `dashboard-health.json` — is it up, per client, right now; plus RAM against
+  the summed agent ceiling, disk, load, agent containers against their limit,
+  deployed sha per client, and a live error log.
+- `dashboard-requests.json` — failure ratio, outcome mix, the `errorCode`
+  breakdown, duration p50/p95, the per-stage split that answers "why was that
+  slow", spend, slot wait, publish vs undo, and the failure lines with their
+  reasons.
+
+---
+
 ## Tier A — interrupt me
 
 | # | Rule | Query | For | Why this tier |
