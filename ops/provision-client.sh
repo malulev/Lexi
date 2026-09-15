@@ -203,6 +203,20 @@ create_user() {
     die "no subordinate GID range for ${SLUG} in /etc/subgid. Allocate one, e.g.: usermod --add-subuids 100000-165535 --add-subgids 100000-165535 ${SLUG}"
 }
 
+# Membership of lexi-slots is what lets this client's uid take a slot from the
+# admission daemon, and what the daemon counts when it sizes capacity. The
+# reload recomputes capacity for the new count; harmless if the daemon is not
+# installed.
+enroll_in_slots() {
+  if ! getent group lexi-slots >/dev/null; then
+    note "lexi-slots group absent (host bootstrapped before the admission queue); skipping enrolment"
+    return 0
+  fi
+  usermod -aG lexi-slots "$SLUG" || die "could not add ${SLUG} to lexi-slots"
+  systemctl reload lexi-slotd.service 2>/dev/null || true
+  note "enrolled ${SLUG} in lexi-slots"
+}
+
 # Without linger, /run/user/<uid> and the user's systemd instance exist only
 # while the user has a login session — so the client's daemon would stop the
 # moment an operator logged out, and would never start at boot. These accounts
@@ -331,17 +345,16 @@ WEBAGENT_STATE_DIR=${CLIENT_ROOT}/${SLUG}/state
 # This client's own rootless daemon. Its authority is user ${SLUG}, not root.
 DOCKER_SOCK=/run/user/${uid}/docker.sock
 
+# The host admission queue. Same path on the host and in the container
+# (docker-compose.yml mounts /run/lexi). Remove the line to run without it.
+SLOT_BROKER_SOCKET=/run/lexi/slotd.sock
+
 # Loopback port the reverse proxy forwards to. Unique per client on this host.
 PORT_HOST=${PORT}
 
 # Set by ops/release.sh on every roll-forward. Leave them alone by hand.
 APP_IMAGE=127.0.0.1:${REGISTRY_PORT}/lexi/app:bootstrap
 AGENT_IMAGE=127.0.0.1:${REGISTRY_PORT}/webagent/agent:bootstrap
-
-# Agent containers allowed at once ON THIS CLIENT'S DAEMON. Each client has its
-# own daemon, so this is per client and the host total is the sum across
-# clients — budget about 1 GB of RAM per concurrent run. See ops/README.md.
-MAX_CONCURRENT_RUNS=2
 
 # --- Fill these in by hand --------------------------------------------------
 
@@ -440,6 +453,7 @@ main() {
   refuse_port_collision
   create_user
   enable_linger
+  enroll_in_slots
   install_rootless_daemon
   create_tree
   copy_compose

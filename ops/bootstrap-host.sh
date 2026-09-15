@@ -226,12 +226,14 @@ verify_registry() {
 }
 
 # A host with no swap resolves memory pressure by killing something, and the
-# kernel picks by size — which on this box can be Caddy or another client's
-# app rather than the agent run that caused it. Agent containers are capped at
-# 1 GiB each (src/lib/runner/docker.ts), but the ceiling is the SUM of every
-# client's MAX_CONCURRENT_RUNS and nothing stops that exceeding RAM. Swap turns
-# the overshoot into slowness, which is recoverable, instead of a kill, which
-# is not.
+# kernel picks by size. Every client can run one agent at a time (~400 MB
+# each, measured) and nothing in the product admits across clients, so the
+# ceiling is the client count and nothing stops that exceeding RAM. Swap turns
+# an overshoot into slowness instead of a kill. Whether that trade is right is
+# arguable — a 2026-09-14 stress test recovered in a minute *because* there was
+# no swap to thrash through — so this is opt-out (--no-swap) rather than law.
+# Host-wide admission is the lease daemon designed in
+# docs/superpowers/specs/2026-09-14-host-admission-queue-design.md.
 ensure_swap() {
   if [ "$WITH_SWAP" -eq 0 ]; then
     note "skipping swap (--no-swap)"
@@ -271,6 +273,25 @@ install_monitoring() {
   "${SCRIPT_DIR}/install-monitoring.sh"
 }
 
+# The host admission queue: one daemon, socket-activated, unprivileged. The
+# `lexi-slots` group is both its authorization list and its client count;
+# provision-client.sh enrols each client. Python 3 is present on every
+# supported host image; the daemon is standard library only.
+install_slotd() {
+  command -v python3 >/dev/null || die "python3 is required for lexi-slotd; apt-get install -y python3"
+  getent group lexi-slots >/dev/null || groupadd --system lexi-slots
+  install -d -m 755 /run/lexi /etc/lexi
+  [ -f /etc/lexi/slots.env ] || install -m 644 "${SCRIPT_DIR}/slotd/slots.env.example" /etc/lexi/slots.env
+  local unit
+  for unit in lexi-slotd.socket lexi-slotd.service; do
+    sed "s#/opt/lexi/src#${SCRIPT_DIR%/ops}#g" "${SCRIPT_DIR}/slotd/systemd/${unit}" \
+      >"/etc/systemd/system/${unit}"
+  done
+  systemctl daemon-reload
+  systemctl enable --now lexi-slotd.socket
+  note "lexi-slotd listening on /run/lexi/slotd.sock; capacity: python3 ${SCRIPT_DIR}/slotd/lexi_slotd.py status"
+}
+
 main() {
   parse_args "$@"
   require_root
@@ -282,6 +303,7 @@ main() {
   verify_registry
   ensure_swap
   install_monitoring
+  install_slotd
 
   cat <<EOF
 

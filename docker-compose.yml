@@ -119,15 +119,6 @@ services:
       WEBAGENT_STATE_DIR: ${WEBAGENT_STATE_DIR:-/var/lib/webagent}
       AGENT_IMAGE: ${AGENT_IMAGE:-webagent/agent:latest}
       NODE_ENV: production
-      # Host-wide cap on agent containers, counted on the daemon above across
-      # every installation that shares it. See README, "Several sites on one host".
-      #
-      # "Host-wide" is true only while every installation shares one daemon.
-      # Under the ops/ topology each client has its own rootless daemon, so the
-      # count is per client and the host total is the SUM across clients. The
-      # application cannot see that — it only ever asks its own daemon — so the
-      # budgeting is the operator's: see ops/README.md.
-      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
       # The commit this image was built from, written into the client's .env by
       # ops/release.sh. Served by /api/health so drift across a fleet is
       # checkable from outside the box, and so a rollback is visible as a
@@ -147,6 +138,12 @@ services:
       # with all the authority the warning at the top of this file describes.
       - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock
       - ${WEBAGENT_STATE_DIR:-/var/lib/webagent}:${WEBAGENT_STATE_DIR:-/var/lib/webagent}
+      # The host admission daemon's socket directory. The directory, not the
+      # socket: a bind mount of a missing file makes Docker create a directory
+      # with the socket's name, while a missing directory is harmless and
+      # lets the socket appear later. Same path both sides, like the state
+      # dir, so SLOT_BROKER_SOCKET in .env is right on the host and in here.
+      - ${SLOT_BROKER_DIR:-/run/lexi}:/run/lexi
 
     ports:
       # Loopback only: the app speaks plain HTTP and does no TLS of its own, so
