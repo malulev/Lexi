@@ -14,14 +14,6 @@
   "templating": {
     "list": [
       {
-        "name": "loki",
-        "label": "Loki",
-        "type": "datasource",
-        "query": "loki",
-        "hide": 0,
-        "current": {}
-      },
-      {
         "name": "slug",
         "label": "Client",
         "type": "query",
@@ -33,6 +25,24 @@
         },
         "query": "label_values({job=\"lexi\"}, slug)",
         "refresh": 2,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "allValue": ".*",
+        "sort": 1
+      },
+      {
+        "name": "loki",
+        "label": "Loki",
+        "type": "datasource",
+        "query": "loki",
+        "hide": 0,
         "current": {}
       }
     ]
