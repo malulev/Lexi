@@ -377,6 +377,17 @@ roll_client() {
   previous_app="$(read_env_value "$env_file" APP_IMAGE)"
   previous_agent="$(read_env_value "$env_file" AGENT_IMAGE)"
 
+  # The compose file is part of the release too: a bind mount or a variable
+  # added at this commit has to reach the client's copy, or the container
+  # comes up on yesterday's shape with today's image. Same mode and owner
+  # provisioning gave it. Not rolled back on failure below: the file is
+  # backward-compatible with the previous image by construction, and a
+  # half-old, half-new client is harder to reason about than a new one.
+  install -o "$slug" -g "$slug" -m 0600 "${REPO_ROOT}/docker-compose.yml" "${dir}/docker-compose.yml" || {
+    echo "  ${slug}: could not refresh docker-compose.yml" >&2
+    return 1
+  }
+
   # Written into .env, not exported for the one command: Compose interpolates
   # .env, and a client restarted by systemd or by hand after a reboot must come
   # back on the tag it was rolled to and not on whatever it was provisioned with.
