@@ -13,7 +13,8 @@ import type { Mirror } from '@/lib/mirror/types';
 import { createNetlifyClient, type NetlifyClient } from '@/lib/netlify';
 import { createMailer, type Mailer } from '@/lib/notify/email';
 import { createDockerRunner } from '@/lib/runner/docker';
-import { createDockerSlots, type AgentSlots } from '@/lib/runner/slots';
+import { createLeaseSlots } from '@/lib/runner/lease-slots';
+import { type AgentSlots, UNLIMITED_SLOTS } from '@/lib/runner/slots';
 import type { JobRunner } from '@/lib/runner/types';
 import type { Env } from '@/types';
 
@@ -89,7 +90,14 @@ export function getInstallation(): Installation {
       author: { name: 'Site Editor', email: env.smtpFrom },
     }),
     runner: createDockerRunner({ image: AGENT_IMAGE, apiKey: env.openrouterApiKey, docker }),
-    slots: createDockerSlots({ docker, limit: env.maxConcurrentRuns }),
+    // Host-wide admission, when the host runs the lease daemon (ops/slotd).
+    // Each installation serves one site and the site lock bounds it to one
+    // run, so without the daemon there is nothing to wait for here; with it,
+    // every client on the host queues in one line. Fail-open: a daemon that
+    // cannot be reached degrades to today's behaviour, never to an outage.
+    slots: env.slotBrokerSocket
+      ? createLeaseSlots({ socketPath: env.slotBrokerSocket, fallback: UNLIMITED_SLOTS })
+      : UNLIMITED_SLOTS,
     // Under the shared state dir, so the agent's /control bind mount resolves
     // on the host daemon (see the field's note above).
     workRoot: join(STATE_DIR, 'control'),

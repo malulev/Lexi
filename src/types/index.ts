@@ -34,12 +34,8 @@ export interface Env {
   smtpUrl: string;
   smtpFrom: string;
   publicBaseUrl: string;
-  /**
-   * How many agent containers may run at once on the Docker daemon this
-   * installation uses. Counted across every installation sharing that
-   * daemon, not per site: the daemon is the shared resource.
-   */
-  maxConcurrentRuns: number;
+  /** Unix socket of the host admission daemon; absent, requests run without a host queue. */
+  slotBrokerSocket?: string;
 }
 
 /**

@@ -186,19 +186,19 @@ describe('parseEnv', () => {
     expect(lineCount).toBeGreaterThanOrEqual(3);
   });
 
-  describe('MAX_CONCURRENT_RUNS', () => {
-    it('defaults to two agents at once when unset', () => {
-      expect(parseEnv(validRawEnv()).maxConcurrentRuns).toBe(2);
+  describe('SLOT_BROKER_SOCKET', () => {
+    it('is absent when unset, so the installation runs without a host queue', () => {
+      expect(parseEnv(validRawEnv()).slotBrokerSocket).toBeUndefined();
     });
 
-    it('reads a positive integer', () => {
-      expect(parseEnv({ ...validRawEnv(), MAX_CONCURRENT_RUNS: '4' }).maxConcurrentRuns).toBe(4);
-    });
-
-    it.each(['0', '-1', '1.5', 'two', '17'])('rejects %s', (value) => {
-      expect(() => parseEnv({ ...validRawEnv(), MAX_CONCURRENT_RUNS: value })).toThrow(
-        /MAX_CONCURRENT_RUNS/,
+    it('reads the socket path', () => {
+      expect(parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '/run/lexi/slotd.sock' }).slotBrokerSocket).toBe(
+        '/run/lexi/slotd.sock',
       );
+    });
+
+    it('rejects an empty value rather than silently disabling the queue', () => {
+      expect(() => parseEnv({ ...validRawEnv(), SLOT_BROKER_SOCKET: '' })).toThrow(/SLOT_BROKER_SOCKET/);
     });
   });
 });

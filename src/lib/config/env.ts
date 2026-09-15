@@ -80,13 +80,12 @@ const rawEnvSchema = z.object({
   SMTP_URL: z.string().min(1, 'is required'),
   SMTP_FROM: z.string().min(1, 'is required'),
   PUBLIC_BASE_URL: z.url({ message: 'must be a valid absolute URL' }),
-  MAX_CONCURRENT_RUNS: z
-    .string()
-    .optional()
-    .default('2')
-    .refine((value) => /^\d+$/.test(value), 'must be a whole number')
-    .transform(Number)
-    .refine((value) => value >= 1 && value <= 16, 'must be between 1 and 16'),
+  /**
+   * The host admission daemon's socket, as seen from inside the container
+   * (docker-compose.yml mounts /run/lexi at the same path). Unset means no
+   * host-wide queue: a development machine, or a host not yet upgraded.
+   */
+  SLOT_BROKER_SOCKET: z.string().min(1, 'must be a socket path when set').optional(),
 })
   // Either spelling satisfies the requirement; the fault is reported under
   // the name a fresh deployment should use.
@@ -123,7 +122,7 @@ function toEnv(data: z.infer<typeof rawEnvSchema>): Env {
     smtpUrl: data.SMTP_URL,
     smtpFrom: data.SMTP_FROM,
     publicBaseUrl: data.PUBLIC_BASE_URL,
-    maxConcurrentRuns: data.MAX_CONCURRENT_RUNS,
+    slotBrokerSocket: data.SLOT_BROKER_SOCKET,
   };
 }
 
