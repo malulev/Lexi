@@ -281,3 +281,212 @@ class FakePlatform(Platform):
 
 def detect_platform() -> Platform:
     return DarwinPlatform() if sys.platform == "darwin" else LinuxPlatform()
+
+
+# ---------------------------------------------------------------------------
+# Broker: the queue
+# ---------------------------------------------------------------------------
+
+LogFn = Callable[[str, Dict[str, object]], None]
+
+
+def _no_log(event: str, fields: Dict[str, object]) -> None:
+    return None
+
+
+@dataclass
+class Grant:
+    memory_bytes: int
+    waited_seconds: float
+
+
+@dataclass
+class Refusal:
+    reason: str
+
+
+@dataclass
+class _Waiter:
+    client: str
+    request_id: str
+    deadline: Optional[float]
+    enqueued_at: float
+    future: "asyncio.Future[object]"
+    on_queued: Callable[[int], None]
+    announced: bool = False
+
+
+@dataclass
+class _Lease:
+    request_id: str
+    granted_at: float
+
+
+def _p50(values: Deque[float]) -> Optional[float]:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2]
+
+
+class Broker:
+    """
+    Owns nothing but memory. Every fact about who holds what lives exactly as
+    long as the connection that established it, which is what makes a crashed
+    client a freed slot rather than a stale one.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        platform: Platform,
+        capacity: int,
+        clock: Callable[[], float] = time.monotonic,
+        log: LogFn = _no_log,
+    ) -> None:
+        self.config = config
+        self.platform = platform
+        self.capacity = capacity
+        self.clock = clock
+        self.log = log
+        self.leases: Dict[str, _Lease] = {}
+        self.queue: Deque[_Waiter] = deque()
+        # How long leases were held: the basis for projecting a new waiter's wait.
+        self.held_ring: Deque[float] = deque(maxlen=config.ring_size)
+        # How long waiters waited: the metric an operator watches.
+        self.wait_ring: Deque[float] = deque(maxlen=config.ring_size)
+        self.refused: Dict[str, int] = {}
+        self.braked = False
+        self._ticker: Optional["asyncio.Task[None]"] = None
+
+    # -- reading ------------------------------------------------------------
+
+    def projected_wait_seconds(self, position: int) -> Optional[float]:
+        p50 = _p50(self.held_ring)
+        if p50 is None:
+            return None
+        return (position / self.capacity) * p50
+
+    def status(self) -> Dict[str, object]:
+        return {
+            "capacity": self.capacity,
+            "leased": len(self.leases),
+            "queued": len(self.queue),
+            "braked": self.braked,
+            "memAvailable": self.platform.mem_available(),
+            "memoryBytes": self.config.agent_mem_cap,
+            "heldSecondsP50": _p50(self.held_ring),
+            "waitSecondsP50": _p50(self.wait_ring),
+            "refused": dict(self.refused),
+            "holders": {client: lease.request_id for client, lease in self.leases.items()},
+        }
+
+    # -- writing ------------------------------------------------------------
+
+    async def acquire(
+        self,
+        client: str,
+        request_id: str,
+        max_wait_ms: Optional[int],
+        on_queued: Callable[[int], None],
+    ) -> object:
+        """Resolves to a Grant or a Refusal. Cancel it to leave the queue."""
+        if client in self.leases or any(waiter.client == client for waiter in self.queue):
+            return self.refuse(client, request_id, "already_holding")
+
+        position = len(self.queue) + 1
+        if max_wait_ms is not None:
+            projected = self.projected_wait_seconds(position)
+            if projected is not None and projected * 1000 > max_wait_ms:
+                return self.refuse(client, request_id, "projected_wait_exceeds_ceiling")
+
+        now = self.clock()
+        deadline = now + max_wait_ms / 1000 if max_wait_ms is not None else None
+        waiter = _Waiter(client, request_id, deadline, now, asyncio.get_running_loop().create_future(), on_queued)
+        self.queue.append(waiter)
+        self.pump()
+        if not waiter.future.done():
+            self._announce(waiter)
+            self._ensure_ticker()
+        try:
+            return await waiter.future
+        except asyncio.CancelledError:
+            self._withdraw(waiter)
+            raise
+
+    def release(self, client: str) -> None:
+        lease = self.leases.pop(client, None)
+        if lease is None:
+            return
+        held = self.clock() - lease.granted_at
+        self.held_ring.append(held)
+        self.log("slotd.released", {"client": client, "requestId": lease.request_id, "heldSeconds": round(held, 3)})
+        self.pump()
+
+    def refuse(self, client: str, request_id: str, reason: str) -> Refusal:
+        self.refused[reason] = self.refused.get(reason, 0) + 1
+        self.log("slotd.refused", {"client": client, "requestId": request_id, "reason": reason})
+        return Refusal(reason)
+
+    def pump(self) -> None:
+        """Grant to the head of the queue for as long as there is room, memory permitting."""
+        self._expire()
+        while self.queue and len(self.leases) < self.capacity:
+            if self._brake_holds():
+                if not self.braked:
+                    self.braked = True
+                    self.log("slotd.braked", {"memAvailable": self.platform.mem_available(), "threshold": self._brake_threshold()})
+                self._ensure_ticker()
+                return
+            if self.braked:
+                self.braked = False
+                self.log("slotd.unbraked", {"memAvailable": self.platform.mem_available()})
+            waiter = self.queue.popleft()
+            now = self.clock()
+            waited = now - waiter.enqueued_at
+            self.leases[waiter.client] = _Lease(waiter.request_id, now)
+            self.wait_ring.append(waited)
+            self.log("slotd.granted", {"client": waiter.client, "requestId": waiter.request_id, "waitedSeconds": round(waited, 3), "leased": len(self.leases)})
+            waiter.future.set_result(Grant(self.config.agent_mem_cap, waited))
+        if not self.queue and self.braked:
+            self.braked = False
+
+    # -- internals ----------------------------------------------------------
+
+    def _brake_threshold(self) -> int:
+        return self.config.agent_mem_estimate + self.config.brake_margin
+
+    def _brake_holds(self) -> bool:
+        return self.platform.mem_available() < self._brake_threshold()
+
+    def _announce(self, waiter: _Waiter) -> None:
+        if waiter.announced:
+            return
+        waiter.announced = True
+        waiter.on_queued(list(self.queue).index(waiter) + 1)
+
+    def _withdraw(self, waiter: _Waiter) -> None:
+        try:
+            self.queue.remove(waiter)
+        except ValueError:
+            return
+        self.log("slotd.withdrawn", {"client": waiter.client, "requestId": waiter.request_id})
+        self.pump()
+
+    def _expire(self) -> None:
+        now = self.clock()
+        for waiter in list(self.queue):
+            if waiter.deadline is not None and now >= waiter.deadline:
+                self.queue.remove(waiter)
+                waiter.future.set_result(self.refuse(waiter.client, waiter.request_id, "projected_wait_exceeds_ceiling"))
+
+    def _ensure_ticker(self) -> None:
+        if self._ticker is None or self._ticker.done():
+            self._ticker = asyncio.get_running_loop().create_task(self._tick())
+
+    async def _tick(self) -> None:
+        # Runs only while somebody waits: re-reads memory for the brake and
+        # expires waiters whose ceiling passed with nothing else happening.
+        while self.queue:
+            await asyncio.sleep(self.config.tick_seconds)
+            self.pump()

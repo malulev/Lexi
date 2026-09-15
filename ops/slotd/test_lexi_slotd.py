@@ -189,3 +189,198 @@ class FakePlatformBehaves(unittest.TestCase):
         self.assertEqual(fake.group_members("anything"), ["a", "b"])
         self.assertEqual(fake.uid_to_name(42), "a")
         self.assertIsNone(fake.uid_to_name(7))
+
+
+# ---------------------------------------------------------------------------
+# Broker
+# ---------------------------------------------------------------------------
+import asyncio
+
+
+class Clock:
+    """Deterministic time for the broker; advance() also lets the loop run."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def advance(self, seconds: float) -> None:
+        self.now += seconds
+        await asyncio.sleep(0)
+
+
+def make_broker(capacity=2, mem_available=None, ring=None, clock=None, tick_seconds=0.01):
+    config = slotd.Config.from_env({})
+    config.tick_seconds = tick_seconds
+    platform = slotd.FakePlatform(mem_available=mem_available if mem_available is not None else 4 * 1024 ** 3)
+    broker = slotd.Broker(config, platform, capacity, clock=clock or Clock())
+    for held in ring or []:
+        broker.held_ring.append(held)
+    return broker, platform
+
+
+async def ask(broker, client, request_id="r", max_wait_ms=None):
+    """Start an acquire; returns (task, list of queued positions announced)."""
+    positions: list = []
+    task = asyncio.ensure_future(broker.acquire(client, request_id, max_wait_ms, positions.append))
+    await asyncio.sleep(0)
+    return task, positions
+
+
+class BrokerQueue(unittest.IsolatedAsyncioTestCase):
+    async def test_grants_at_once_below_capacity_without_announcing_a_wait(self):
+        broker, _ = make_broker(capacity=2)
+        task, positions = await ask(broker, "a")
+        grant = await task
+        self.assertIsInstance(grant, slotd.Grant)
+        self.assertEqual(grant.memory_bytes, slotd.parse_size("800M"))
+        self.assertEqual(positions, [])
+
+    async def test_queues_in_arrival_order_and_promotes_exactly_the_next_on_release(self):
+        broker, _ = make_broker(capacity=1)
+        first, _ = await ask(broker, "a")
+        second, second_positions = await ask(broker, "b")
+        third, third_positions = await ask(broker, "c")
+        self.assertTrue(first.done())
+        self.assertFalse(second.done())
+        self.assertFalse(third.done())
+        self.assertEqual(second_positions, [1])
+        self.assertEqual(third_positions, [2])
+
+        broker.release("a")
+        await asyncio.sleep(0)
+        self.assertTrue(second.done())
+        self.assertFalse(third.done())
+
+        broker.release("b")
+        await asyncio.sleep(0)
+        self.assertTrue(third.done())
+
+    async def test_a_client_that_already_holds_or_waits_is_refused(self):
+        broker, _ = make_broker(capacity=1)
+        holder, _ = await ask(broker, "a")
+        await holder
+        again, _ = await ask(broker, "a")
+        self.assertEqual((await again).reason, "already_holding")
+
+        waiter, _ = await ask(broker, "b")
+        twice, _ = await ask(broker, "b")
+        self.assertEqual((await twice).reason, "already_holding")
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+
+    async def test_a_waiter_that_leaves_is_withdrawn_and_the_next_is_served(self):
+        broker, _ = make_broker(capacity=1)
+        holder, _ = await ask(broker, "a")
+        await holder
+        leaver, _ = await ask(broker, "b")
+        stayer, _ = await ask(broker, "c")
+        leaver.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await leaver
+        broker.release("a")
+        await asyncio.sleep(0)
+        self.assertTrue(stayer.done())
+        self.assertEqual(broker.status()["queued"], 0)
+
+    async def test_release_records_how_long_the_lease_was_held(self):
+        clock = Clock()
+        broker, _ = make_broker(capacity=1, clock=clock)
+        task, _ = await ask(broker, "a")
+        await task
+        await clock.advance(12.5)
+        broker.release("a")
+        self.assertEqual(list(broker.held_ring), [12.5])
+
+    async def test_capacity_can_be_raised_live(self):
+        broker, _ = make_broker(capacity=1)
+        first, _ = await ask(broker, "a")
+        await first
+        second, _ = await ask(broker, "b")
+        self.assertFalse(second.done())
+        broker.capacity = 2
+        broker.pump()
+        await asyncio.sleep(0)
+        self.assertTrue(second.done())
+
+
+class BrokerEarlyRefusal(unittest.IsolatedAsyncioTestCase):
+    async def test_without_history_a_long_queue_simply_queues(self):
+        broker, _ = make_broker(capacity=1)
+        first, _ = await ask(broker, "a")
+        await first
+        waiter, positions = await ask(broker, "b", max_wait_ms=1000)
+        self.assertFalse(waiter.done())
+        self.assertEqual(positions, [1])
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+
+    async def test_with_history_a_projected_wait_past_the_ceiling_is_refused_at_once(self):
+        # p50 held = 60s, capacity 1: position 1 projects 60s; a 30s ceiling is hopeless.
+        broker, _ = make_broker(capacity=1, ring=[60.0, 60.0, 60.0])
+        first, _ = await ask(broker, "a")
+        await first
+        hopeless, positions = await ask(broker, "b", max_wait_ms=30_000)
+        self.assertEqual((await hopeless).reason, "projected_wait_exceeds_ceiling")
+        self.assertEqual(positions, [])
+        self.assertEqual(broker.status()["refused"]["projected_wait_exceeds_ceiling"], 1)
+
+    async def test_with_history_a_reachable_wait_queues(self):
+        broker, _ = make_broker(capacity=1, ring=[10.0])
+        first, _ = await ask(broker, "a")
+        await first
+        fine, _ = await ask(broker, "b", max_wait_ms=30_000)
+        self.assertFalse(fine.done())
+        fine.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await fine
+
+
+class BrokerBrake(unittest.IsolatedAsyncioTestCase):
+    async def test_a_free_slot_is_not_granted_while_available_memory_is_below_the_threshold(self):
+        # threshold = 400M estimate + 200M margin = 600M
+        broker, platform = make_broker(capacity=2, mem_available=slotd.parse_size("500M"))
+        task, positions = await ask(broker, "a")
+        self.assertFalse(task.done())
+        self.assertEqual(positions, [1])
+        self.assertTrue(broker.braked)
+        self.assertTrue(broker.status()["braked"])
+
+        platform.available = slotd.parse_size("700M")
+        await asyncio.sleep(0.05)  # a tick
+        self.assertTrue(task.done())
+        self.assertFalse(broker.braked)
+
+    async def test_a_braked_head_that_reaches_its_ceiling_is_refused(self):
+        clock = Clock()
+        broker, _ = make_broker(capacity=2, mem_available=slotd.parse_size("100M"), clock=clock)
+        task, _ = await ask(broker, "a", max_wait_ms=5_000)
+        self.assertFalse(task.done())
+        await clock.advance(6)
+        await asyncio.sleep(0.05)
+        self.assertEqual((await task).reason, "projected_wait_exceeds_ceiling")
+        self.assertEqual(broker.status()["queued"], 0)
+
+
+class BrokerStatus(unittest.IsolatedAsyncioTestCase):
+    async def test_status_reports_the_whole_picture(self):
+        broker, platform = make_broker(capacity=2, ring=[4.0, 6.0, 8.0])
+        holder, _ = await ask(broker, "a", request_id="req-a")
+        await holder
+        status = broker.status()
+        self.assertEqual(status["capacity"], 2)
+        self.assertEqual(status["leased"], 1)
+        self.assertEqual(status["queued"], 0)
+        self.assertEqual(status["braked"], False)
+        self.assertEqual(status["memoryBytes"], slotd.parse_size("800M"))
+        self.assertEqual(status["memAvailable"], platform.available)
+        self.assertEqual(status["heldSecondsP50"], 6.0)
+        self.assertEqual(status["holders"], {"a": "req-a"})
+        self.assertEqual(status["refused"], {})
+        # Granted at once is a wait of zero, and a median of zero is a fact
+        # worth reporting, not an absence of data.
+        self.assertEqual(status["waitSecondsP50"], 0.0)
