@@ -413,9 +413,17 @@ Remaining steps, in this order:
 
   5. Point the reverse proxy at it, e.g. in /etc/caddy/Caddyfile:
        ${HOSTNAME_ARG} {
+           log {
+               output stderr
+           }
            reverse_proxy 127.0.0.1:${PORT}
        }
      then: systemctl reload caddy
+
+     The log block is not optional decoration. Caddy writes no access log at
+     all without it, and stderr means journald, which Alloy already ships.
+     It is the only source of this client's HTTP status codes, latency and
+     5xx rate — the app cannot report a request that never reached it.
 
   6. Send the client their authenticator link (shows the QR once, valid 24 h):
        docker run --rm -v ${REPO_ROOT}:/src:ro -v ${dir}/.env:/secret/.env:ro -w /build node:22-slim \\
