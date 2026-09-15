@@ -247,12 +247,14 @@ def run_stress(options: Options) -> Summary:
                     at = time.time() - started
                     if event == "slotd.granted":
                         summary.granted_order.append(str(record["client"]))
+                        summary.peak_concurrent = max(summary.peak_concurrent, int(record["leased"]))
                         say(f"  [{at:5.1f}s] daemon     granted    {record['client']} (waited {record['waitedSeconds']:.1f}s, leased {record['leased']})")
                     elif event == "slotd.refused":
                         reason = str(record.get("reason"))
                         summary.refused[reason] = summary.refused.get(reason, 0) + 1
                         say(f"  [{at:5.1f}s] daemon     refused    {record.get('client')}: {reason}")
                     elif event == "slotd.braked":
+                        summary.brake_tripped = True
                         say(f"  [{at:5.1f}s] daemon     BRAKE      holding the queue: available {record['memAvailable'] // MB} MB < {record['threshold'] // MB} MB")
                     elif event == "slotd.unbraked":
                         say(f"  [{at:5.1f}s] daemon     brake off  available {record['memAvailable'] // MB} MB")
@@ -268,9 +270,9 @@ def run_stress(options: Options) -> Summary:
                 while not stop_sampling.is_set():
                     status = _status(socket_path)
                     if status:
+                        # Display only: peak concurrency and brake trips are
+                        # taken from the daemon's log, which misses nothing.
                         samples.append(status)
-                        summary.peak_concurrent = max(summary.peak_concurrent, status["leased"])
-                        summary.brake_tripped = summary.brake_tripped or bool(status["braked"])
                         say(f"  [{time.time() - started:5.1f}s] daemon: leased={status['leased']}/{status['capacity']} "
                             f"queued={status['queued']} braked={'yes' if status['braked'] else 'no'} "
                             f"available={status['memAvailable'] // MB} MB")
